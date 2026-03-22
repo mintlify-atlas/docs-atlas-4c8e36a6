@@ -1,0 +1,87 @@
+---
+title: 'CodeExecution'
+description: 'Runs generated code against test cases in a subprocess and measures pass@1. Auto-wired for HumanEval and MBPP.'
+---
+
+`CodeExecution` evaluates code generation by executing the model's output against the test cases provided in the dataset example, using a subprocess with a configurable timeout. A score of `1.0` (pass@1) means the first generated solution passes all tests.
+
+```python
+from context_bench.evaluators import CodeExecution
+```
+
+## Constructor
+
+```python
+CodeExecution(timeout: float = 10.0)
+```
+
+<ParamField path="timeout" type="float" default="10.0">
+  Maximum time in seconds to wait for the subprocess to complete. If execution exceeds this limit, the attempt is counted as a failure.
+</ParamField>
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Expected keys vary by dataset:
+
+  - **HumanEval**: `"context"` (function prompt), `"test"` (check function body), `"entry_point"` (function name to call).
+  - **MBPP**: `"test_list"` (list of assertion strings), optionally `"test_setup_code"` (imports/helpers).
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the generated code string.
+</ParamField>
+
+### Return values
+
+<ResponseField name="pass_at_1" type="float" required>
+  `1.0` if the generated code passes all test cases (subprocess exit code 0), otherwise `0.0`.
+</ResponseField>
+
+<Note>
+  Any exception during execution — including syntax errors, runtime errors, assertion failures, and timeouts — results in `pass_at_1: 0.0`.
+</Note>
+
+## Example
+
+```python
+from context_bench.evaluators import CodeExecution
+ev = CodeExecution(timeout=10.0)
+ev.score(
+    {"context": "def add(a, b):\n", "test": "def check(c):\n    assert c(1,2)==3\n", "entry_point": "add"},
+    {"response": "    return a + b\n"},
+)
+# {'pass_at_1': 1.0}
+```
+
+## Auto-wired datasets
+
+`CodeExecution` is automatically applied when any of the following datasets are selected:
+
+| CLI name | Dataset |
+|----------|---------|
+| `humaneval` | HumanEval |
+| `mbpp` | MBPP |
+
+## Implementation notes
+
+The evaluator assembles the executable code differently depending on the dataset format:
+
+**HumanEval style** (`test` field present):
+1. Concatenate `context` + `response` + `test` into a single script.
+2. Append `check(entry_point)` to invoke the test harness.
+
+**MBPP style** (`test_list` field present):
+1. Start with `response`.
+2. Append optional `test_setup_code` (imports, helpers).
+3. Append each assertion string from `test_list`.
+
+The assembled script is passed to `python3 -c` via `subprocess.run`. Exit code `0` means all assertions passed. `subprocess.TimeoutExpired` and any other exceptions are caught and scored as `0.0`.
+
+<Warning>
+  Code execution runs untrusted model output in a subprocess on the host machine. Use a sandboxed environment for production benchmarking.
+</Warning>

@@ -1,0 +1,154 @@
+---
+title: "Autoresearch loop"
+description: "Iteratively improve a retrieval pipeline on the LoCoMo benchmark using LLM-driven architectural mutations."
+---
+
+The autoresearch loop uses an LLM (Claude Sonnet) to propose, evaluate, and accept or reject architectural improvements to a context pipeline — overnight, unattended. Each iteration either advances the best-known pipeline or reverts to it, building a checkpoint log you can resume at any time.
+
+**SOTA target:** 90% F1 (Hindsight + Gemini-3 Pro + TEMPR, Dec 2025)
+
+## How it works
+
+<Steps>
+  <Step title="Load the starting pipeline">
+    The loop starts from a baseline pipeline file (`sota_pipeline.py` or any file you point `--pipeline-path` at). This file must define a `ContextPipeline` class.
+  </Step>
+
+  <Step title="Evaluate the baseline">
+    The baseline is evaluated on a fixed random sample of `--eval-n` conversations from the LoCoMo training split. This sample is reused for every iteration so accept/reject decisions are comparable.
+  </Step>
+
+  <Step title="Propose a mutation">
+    The mutation LLM reads the current pipeline source and the full score history, then proposes one architectural improvement — coreference resolution, temporal ranking, embedding fallback, etc.
+  </Step>
+
+  <Step title="Evaluate the candidate">
+    The candidate pipeline is imported dynamically and scored on the same fixed sample. If it fails to import or raises an error, it is rejected automatically.
+  </Step>
+
+  <Step title="Accept or reject">
+    If the candidate's score exceeds the current best, the candidate becomes the new baseline and is saved to disk. Otherwise the loop reverts to the previous best and tries again.
+  </Step>
+
+  <Step title="Checkpoint and repeat">
+    After every iteration, the best pipeline and the full log are written to `--output-dir`. The loop runs for `--iterations` steps, then runs a final held-out evaluation comparing the best discovered pipeline against the naive baseline.
+  </Step>
+</Steps>
+
+## Running the loop
+
+### Prerequisites
+
+You need an OpenAI-compatible relay (e.g. [claude-relay](https://github.com/npow/claude-relay)) running before you start the loop.
+
+```bash
+# Start the relay
+cd /path/to/claude-relay
+uv run agent-relay serve --port 18082 --max-concurrent 16
+```
+
+### Start the loop
+
+```bash
+uv run python3 loop.py \
+  --relay http://localhost:18082 \
+  --model claude-haiku-4-5-20251001 \
+  --dataset locomo \
+  --iterations 50 \
+  --eval-n 2 \
+  --max-qa-per-conv 5 \
+  --seed 42 \
+  --output-dir loop_results_v6/ \
+  --pipeline-path src/context_bench/pipeline/sota_pipeline.py
+```
+
+### Resume after a crash
+
+```bash
+uv run python3 loop.py \
+  --relay http://localhost:18082 \
+  --output-dir loop_results_v6/ \
+  --pipeline-path src/context_bench/pipeline/sota_pipeline.py \
+  --resume
+```
+
+With `--resume`, the loop loads `best_pipeline.py` and `loop_log.jsonl` from `--output-dir` and skips re-evaluating the baseline (it reads `baseline_score.json` instead).
+
+## CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--relay` | `http://localhost:18082` | OpenAI-compatible relay URL for evaluation and answer calls. |
+| `--model` | `claude-haiku-4-5-20251001` | Model for evaluation/answer calls. |
+| `--mutation-model` | `claude-sonnet-4-6` | Stronger model used for proposing mutations. |
+| `--dataset` | `locomo` | Dataset to optimize on. One of: `locomo`, `longmemeval_s`, `longmemeval_m`, `longmemeval_oracle`. |
+| `--iterations` | `200` | Number of mutation/evaluation iterations. |
+| `--eval-n` | `30` | Conversations sampled per evaluation iteration. |
+| `--max-qa-per-conv` | `10` | QA pairs sampled per conversation (caps large LoCoMo evals). |
+| `--seed` | `42` | RNG seed for the train/test split. |
+| `--output-dir` | `./loop_results` | Directory for checkpoints, logs, and results. |
+| `--pipeline-path` | repo copy | Path to the starting `context_pipeline.py`. |
+| `--resume` | `false` | Load the last checkpoint from `--output-dir` and continue. |
+| `--tool-relay` | same as `--relay` | Separate relay for the LLM judge and mutator. |
+| `--judge-model` | `haiku` | Model for the LLM judge in the final evaluation. |
+| `--api-key` | `$OPENAI_API_KEY` | Bearer token for the relay. |
+
+## Overnight watchdog
+
+Use the bundled watchdog script to keep the loop running unattended. It checks every 10 minutes and restarts the loop with `--resume` if it crashes or stalls for more than 150 minutes.
+
+```bash
+bash watchdog6.sh
+```
+
+The watchdog starts both the relay and the loop, writing output to `watchdog.log`, `relay.log`, and `run.log`.
+
+## Output files
+
+| File | Contents |
+|------|----------|
+| `run.log` | Full loop stdout: progress lines, scores, mutation summaries. |
+| `loop_log.jsonl` | One JSON object per iteration: `score`, `best_score`, `delta`, `mutation`, `accepted`, `elapsed_s`. |
+| `baseline_score.json` | Cached baseline score. Read on `--resume` to skip re-evaluation. |
+| `best_pipeline.py` | The current best pipeline. Updated after every accepted mutation. |
+| `final_results.json` | Final head-to-head: best discovered pipeline vs. naive baseline on the held-out test set. |
+| `watchdog.log` | Watchdog heartbeat and restart events. |
+| `relay.log` | Relay server stdout. |
+
+## sota_pipeline.py: starting point techniques
+
+The `sota_pipeline.py` file is the recommended starting baseline. It implements:
+
+<AccordionGroup>
+  <Accordion title="Coreference resolution">
+    Pronouns and aliases are resolved to canonical entity names during ingestion. "She" becomes "Alice", "the company" becomes "Acme Corp". This dramatically improves entity-level retrieval precision.
+  </Accordion>
+
+  <Accordion title="Typed entity-relation-value triples">
+    Facts are stored as `(entity, relation, value, turn_idx)` tuples. For example: `("Alice", "works_at", "Acme Corp", 12)`. This allows precise lookups that raw text search cannot match.
+  </Accordion>
+
+  <Accordion title="Entity profiles">
+    Each entity accumulates all known facts, sorted by recency. A single lookup retrieves everything the system knows about a person or concept.
+  </Accordion>
+
+  <Accordion title="Query decomposition">
+    Multi-part questions are split into sub-questions before retrieval. "What did Alice study, and where does she work now?" becomes two separate retrievals.
+  </Accordion>
+
+  <Accordion title="Multi-hop retrieval">
+    Entities extracted from a question are used to retrieve their profiles, which are then reasoned over together. Supports chains like Alice → employer → location.
+  </Accordion>
+
+  <Accordion title="Temporal ranking">
+    Questions containing "current" or "now" prefer recent facts. Questions containing "used to" or "before" prefer older facts. Turn index is used as the recency signal.
+  </Accordion>
+
+  <Accordion title="Embedding fallback">
+    When entity-lookup retrieval returns too few results, `all-MiniLM-L6-v2` semantic search fills the gap. Prevents silent failures on out-of-vocabulary questions.
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+  Start with a smaller `--eval-n` (2–5 conversations) and `--max-qa-per-conv` (5) to iterate quickly. Increase these once you have a promising direction to get a reliable signal.
+</Tip>

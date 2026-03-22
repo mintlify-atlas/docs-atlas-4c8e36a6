@@ -1,0 +1,255 @@
+---
+title: "Evaluators"
+description: "Evaluators score each (input, output) pair. They are auto-wired based on dataset type — no manual configuration needed."
+---
+
+An evaluator compares the original example (before your system ran) with the processed example (after) and returns a `dict[str, float]` of named scores.
+
+## The Evaluator protocol
+
+```python
+from typing import Any, Protocol, runtime_checkable
+
+@runtime_checkable
+class Evaluator(Protocol):
+    """Scores a (input, output) pair. Returns dict of metric_name -> float."""
+
+    @property
+    def name(self) -> str: ...
+
+    def score(
+        self, original: dict[str, Any], processed: dict[str, Any]
+    ) -> dict[str, float]: ...
+```
+
+`original` is the raw dataset example. `processed` is the dict returned by `System.process()`. Evaluators read fields from both — for example, `original["answer"]` (the ground truth) and `processed["response"]` (the system's output).
+
+## Auto-wiring
+
+When you run the CLI or call `evaluate()`, evaluators are selected automatically based on which datasets you load. You do not configure them manually. For example, loading `humaneval` auto-wires `CodeExecution`; loading `mmlu` auto-wires `MultipleChoiceAccuracy`.
+
+For the Python API, pass evaluators explicitly:
+
+```python
+from context_bench.evaluators import AnswerQuality, MathEquivalence
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality(), MathEquivalence()],
+    ...
+)
+```
+
+## Built-in evaluators
+
+### AnswerQuality
+
+Token-level F1 and exact match using SQuAD-style text normalization. Applied to every dataset by default.
+
+| Score field | Description |
+|-------------|-------------|
+| `f1` | Token-overlap F1 between answer and response |
+| `exact_match` | 1.0 if normalized strings match exactly |
+| `recall` | Fraction of answer tokens present in response |
+| `contains` | 1.0 if answer appears as a substring in response |
+
+```python
+from context_bench.evaluators import AnswerQuality
+
+ev = AnswerQuality()
+ev.score({"answer": "Paris"}, {"response": "The capital is Paris."})
+# {'f1': 0.5, 'exact_match': 0.0, 'recall': 1.0, 'contains': 1.0}
+```
+
+**Auto-wired for:** all datasets.
+
+---
+
+### SummarizationQuality
+
+ROUGE-L precision, recall, and F1. Auto-wired for summarization datasets.
+
+| Score field | Description |
+|-------------|-------------|
+| `rouge_l_precision` | ROUGE-L precision |
+| `rouge_l_recall` | ROUGE-L recall |
+| `rouge_l_f1` | ROUGE-L F1 |
+
+**Auto-wired for:** `multi-news`, `dialogsum`, `qmsum`, `summscreenfd`, `meetingbank`, `govreport`.
+
+---
+
+### MultipleChoiceAccuracy
+
+Extracts the chosen letter (A–J) from the response and compares it to the correct answer.
+
+| Score field | Description |
+|-------------|-------------|
+| `mc_accuracy` | 1.0 if extracted letter matches correct letter |
+
+```python
+from context_bench.evaluators import MultipleChoiceAccuracy
+
+ev = MultipleChoiceAccuracy()
+ev.score({"correct_letter": "B"}, {"response": "The answer is B."})
+# {'mc_accuracy': 1.0}
+```
+
+**Auto-wired for:** `mmlu`, `mmlu-pro`, `arc-challenge`, `gpqa`, `hellaswag`, `winogrande`.
+
+---
+
+### CodeExecution
+
+Runs generated code against test cases in a subprocess and reports pass@1.
+
+| Score field | Description |
+|-------------|-------------|
+| `pass_at_1` | 1.0 if the generated code passes all test cases |
+
+```python
+from context_bench.evaluators import CodeExecution
+
+ev = CodeExecution(timeout=10.0)
+ev.score(
+    {
+        "context": "def add(a, b):\n",
+        "test": "def check(c):\n    assert c(1,2)==3\n",
+        "entry_point": "add",
+    },
+    {"response": "    return a + b\n"},
+)
+# {'pass_at_1': 1.0}
+```
+
+**Auto-wired for:** `humaneval`, `mbpp`.
+
+---
+
+### MathEquivalence
+
+LaTeX-aware numeric comparison. Handles fractions, percentages, and boxed answers.
+
+| Score field | Description |
+|-------------|-------------|
+| `math_equiv` | 1.0 if the response is mathematically equivalent to the answer |
+
+```python
+from context_bench.evaluators import MathEquivalence
+
+ev = MathEquivalence()
+ev.score({"answer": r"\frac{1}{2}"}, {"response": "0.5"})
+# {'math_equiv': 1.0}
+
+ev.score({"answer": "42"}, {"response": r"The answer is $\boxed{42}$."})
+# {'math_equiv': 1.0}
+```
+
+**Auto-wired for:** `math`, `gsm8k`, `mgsm`.
+
+---
+
+### NLILabelMatch
+
+Extracts classification labels from responses with alias mapping (e.g., "yes" → "entailment").
+
+| Score field | Description |
+|-------------|-------------|
+| `nli_accuracy` | 1.0 if the extracted label matches the ground-truth label |
+
+```python
+from context_bench.evaluators import NLILabelMatch
+
+ev = NLILabelMatch()
+ev.score({"answer": "Entailment"}, {"response": "Yes, this is true."})
+# {'nli_accuracy': 1.0}  ("yes" maps to "entailment")
+```
+
+**Auto-wired for:** `contract-nli`, `scifact`.
+
+---
+
+### IFEvalChecker
+
+19 programmatic constraint checks covering keywords, length, format, case, and more.
+
+| Score field | Description |
+|-------------|-------------|
+| `ifeval_strict` | All constraints satisfied (strict mode) |
+| `ifeval_loose` | Majority of constraints satisfied (loose mode) |
+
+```python
+from context_bench.evaluators import IFEvalChecker
+
+ev = IFEvalChecker()
+ev.score(
+    {
+        "instruction_id_list": ["punctuation:no_comma", "keywords:existence"],
+        "kwargs": [{}, {"keywords": ["hello"]}],
+    },
+    {"response": "hello world"},
+)
+# {'ifeval_strict': 1.0, 'ifeval_loose': 1.0}
+```
+
+**Auto-wired for:** `ifeval`.
+
+---
+
+### LLMJudge
+
+Uses an external LLM to rate responses on a 1–5 scale, normalized to 0–1.
+
+| Score field | Description |
+|-------------|-------------|
+| `judge_score` | Rating from 1–5 normalized to 0–1 |
+
+```python
+from context_bench.evaluators import LLMJudge
+
+judge = LLMJudge(base_url="http://localhost:9090", model="gpt-4")
+judge.score(
+    {"question": "What is 2+2?", "answer": "4"},
+    {"response": "The answer is 4."},
+)
+# {'judge_score': 0.75}  (rating 4/5 → normalized to 0–1)
+```
+
+**Auto-wired for:** any dataset when `--judge-url` is provided.
+
+<Tip>
+Enable `LLMJudge` from the CLI by passing `--judge-url http://localhost:9090 --judge-model gpt-4`.
+</Tip>
+
+## Implementing a custom evaluator
+
+Any class with `name` and `score()` satisfies the protocol:
+
+```python
+class WordCountDiff:
+    name = "word-count-diff"
+
+    def score(self, original, processed):
+        original_words = len(original.get("context", "").split())
+        output_words = len(processed.get("response", "").split())
+        ratio = output_words / original_words if original_words else 0.0
+        return {"word_count_ratio": ratio}
+```
+
+Pass it alongside built-in evaluators:
+
+```python
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality(), WordCountDiff()],
+    ...
+)
+```
+
+All score fields from all evaluators are merged into the same `EvalRow.scores` dict, so they are all available to metrics.
+
+<Note>
+`Evaluator` is a `typing.Protocol`. Implement the methods on any class — no imports from context-bench are required to define a custom evaluator.
+</Note>

@@ -1,0 +1,202 @@
+---
+title: "OpenAIProxy"
+description: "A built-in System that forwards examples to any OpenAI-compatible chat completions endpoint."
+---
+
+```python
+from context_bench import OpenAIProxy
+```
+
+`OpenAIProxy` implements the `System` protocol and requires no boilerplate HTTP code. Point it at any proxy that serves the `/v1/chat/completions` endpoint and it handles message construction, authentication, retries, and token usage tracking automatically.
+
+## Constructor
+
+```python
+OpenAIProxy(
+    base_url: str,
+    model: str = "gpt-3.5-turbo",
+    name: str | None = None,
+    api_key: str | None = None,
+    system_prompt: str | None = None,
+    build_messages: Callable[[dict], list[dict]] | None = None,
+    timeout: float = 30.0,
+    extra_body: dict | None = None,
+    max_retries: int = 3,
+    retry_base_delay: float = 1.0,
+)
+```
+
+## Parameters
+
+<ParamField path="base_url" type="str" required>
+  Root URL of the proxy, e.g. `"http://localhost:8080"`. A trailing slash is stripped automatically. `OpenAIProxy` appends `/v1/chat/completions` to this URL for every request.
+</ParamField>
+
+<ParamField path="model" type="str" default="gpt-3.5-turbo">
+  Model name sent in the `"model"` field of each request body. The proxy is responsible for routing or mapping this value.
+</ParamField>
+
+<ParamField path="name" type="str | None" default="None">
+  Display name used in benchmark results and the `EvalRow.system` field. If `None`, the name is derived from the host portion of `base_url` — for example, `"http://localhost:8080"` becomes `"openai_proxy_localhost:8080"`.
+</ParamField>
+
+<ParamField path="api_key" type="str | None" default="None">
+  Bearer token sent in the `Authorization` header. Falls back to the `OPENAI_API_KEY` environment variable when `None`. If neither is set, the header is omitted entirely.
+</ParamField>
+
+<ParamField path="system_prompt" type="str | None" default="None">
+  When provided, prepended as a `{"role": "system", "content": ...}` message before any other messages in every request. Useful for injecting a fixed instruction without modifying your dataset.
+</ParamField>
+
+<ParamField path="build_messages" type="Callable[[dict], list[dict]] | None" default="None">
+  Full override for message construction. Receives the example dict and must return a list of message dicts in OpenAI chat format. When set, `system_prompt` is ignored for single-turn examples (it is still applied in `process_conversation`).
+</ParamField>
+
+<ParamField path="timeout" type="float" default="30.0">
+  HTTP request timeout in seconds per attempt. Does not include retry delays.
+</ParamField>
+
+<ParamField path="extra_body" type="dict | None" default="None">
+  Additional keys merged into the request body, e.g. `{"temperature": 0, "max_tokens": 256}`. Useful for controlling generation parameters without subclassing.
+</ParamField>
+
+<ParamField path="max_retries" type="int" default="3">
+  Number of retries on transient failures: HTTP 429 (rate limit), 5xx server errors, and connection errors. Set to `0` to disable retries. Retries use exponential backoff starting at `retry_base_delay` seconds. The `Retry-After` response header is respected for 429 responses.
+</ParamField>
+
+<ParamField path="retry_base_delay" type="float" default="1.0">
+  Base delay in seconds for exponential backoff between retries. The delay for attempt `n` is `retry_base_delay * 2^n`.
+</ParamField>
+
+## System protocol
+
+`OpenAIProxy` satisfies the `System` protocol:
+
+| Member | Description |
+|---|---|
+| `.name` | The display name (set by `name` or derived from `base_url`) |
+| `.process(example)` | Sends the example to the proxy and returns the dict with a `"response"` key added |
+| `.process_conversation(turns)` | Sends a multi-turn conversation turn-by-turn and returns all assistant responses |
+
+### process() behavior
+
+`process(example)` builds a message list from the example dict using the following rules (unless `build_messages` is provided):
+
+- If `system_prompt` is set, it is prepended as a system message.
+- If the example has a `"turns"` key, those messages are used directly (multi-turn passthrough).
+- If the example has a `"question"` key, `context` is sent as a system message and `question` as a user message.
+- Otherwise, `context` is sent as a single user message.
+
+The returned dict is the original example dict with a `"response"` key containing the assistant's reply. If the proxy returns usage data, an `"api_usage"` key is also added.
+
+<Note>
+  Token counts in `EvalRow` are measured by context-bench's own tokenizer (tiktoken by default), not by the proxy's reported usage. Proxy usage (if available) is stored in `EvalRow.metadata` under `prompt_tokens`, `completion_tokens`, and `total_tokens`.
+</Note>
+
+## Environment variable
+
+<Warning>
+  If `api_key` is `None` and the `OPENAI_API_KEY` environment variable is not set, requests are sent without an `Authorization` header. Some proxies accept unauthenticated requests on localhost; others will return HTTP 401.
+</Warning>
+
+## Examples
+
+### Basic usage
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PassRate, Latency
+
+kompact = OpenAIProxy(
+    "http://localhost:7878",
+    model="claude-sonnet-4-5-20250929",
+    name="kompact",
+)
+
+result = evaluate(
+    systems=[kompact],
+    dataset=your_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1"), PassRate(score_field="f1"), Latency()],
+)
+```
+
+### With a system prompt
+
+```python
+from context_bench import OpenAIProxy
+
+proxy = OpenAIProxy(
+    base_url="http://localhost:8080",
+    model="gpt-4",
+    name="concise-gpt4",
+    system_prompt="Be concise. Answer in one sentence.",
+)
+```
+
+### With extra body parameters
+
+```python
+from context_bench import OpenAIProxy
+
+proxy = OpenAIProxy(
+    base_url="http://localhost:8080",
+    model="gpt-4",
+    extra_body={"temperature": 0, "max_tokens": 256},
+)
+```
+
+### With an explicit API key
+
+```python
+from context_bench import OpenAIProxy
+
+proxy = OpenAIProxy(
+    base_url="http://localhost:8080",
+    model="gpt-4",
+    api_key="sk-my-key",  # or set OPENAI_API_KEY env var
+)
+```
+
+### Comparing two proxies
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, CompressionRatio
+
+kompact = OpenAIProxy("http://localhost:7878", name="kompact")
+headroom = OpenAIProxy("http://localhost:8787", name="headroom")
+
+result = evaluate(
+    systems=[kompact, headroom],
+    dataset=your_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1"), CompressionRatio()],
+)
+```
+
+### Custom message construction
+
+Use `build_messages` for full control over the request format:
+
+```python
+from context_bench import OpenAIProxy
+
+def my_messages(example):
+    return [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": example["context"] + "\n\n" + example["question"]},
+    ]
+
+proxy = OpenAIProxy(
+    base_url="http://localhost:8080",
+    model="gpt-4",
+    build_messages=my_messages,
+)
+```
+
+<Tip>
+  For systems that use a Python SDK rather than an OpenAI-compatible HTTP proxy, implement the `System` protocol directly instead of using `OpenAIProxy`. See the [custom system guide](/guides/custom-system).
+</Tip>

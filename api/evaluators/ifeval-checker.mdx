@@ -1,0 +1,131 @@
+---
+title: 'IFEvalChecker'
+description: 'Programmatic instruction-following checker with 19 constraint types covering keywords, length, format, case, and more. Auto-wired for IFEval.'
+---
+
+`IFEvalChecker` evaluates instruction-following by running a set of programmatic checks against the model's response. Each check verifies one verifiable constraint from the [IFEval benchmark](https://arxiv.org/abs/2311.07911).
+
+```python
+from context_bench.evaluators import IFEvalChecker
+```
+
+## Constructor
+
+`IFEvalChecker` takes no constructor parameters.
+
+```python
+ev = IFEvalChecker()
+```
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Must contain:
+
+  - `"instruction_id_list"` — a list of instruction ID strings (e.g. `["punctuation:no_comma", "keywords:existence"]`).
+  - `"kwargs"` — a list of parameter dicts, one per instruction ID (e.g. `[{}, {"keywords": ["hello"]}]`).
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the model's output string.
+</ParamField>
+
+### Return values
+
+<ResponseField name="ifeval_strict" type="float" required>
+  `1.0` if **all** instructions in `instruction_id_list` pass, otherwise `0.0`.
+</ResponseField>
+
+<ResponseField name="ifeval_loose" type="float" required>
+  Fraction of instructions that pass: `passed / total`. Ranges from `0.0` to `1.0`.
+</ResponseField>
+
+<Note>
+  If `instruction_id_list` is empty, both scores return `1.0`. Unknown instruction IDs are counted as passing (fail-open).
+</Note>
+
+## Example
+
+```python
+from context_bench.evaluators import IFEvalChecker
+ev = IFEvalChecker()
+ev.score(
+    {"instruction_id_list": ["punctuation:no_comma", "keywords:existence"],
+     "kwargs": [{}, {"keywords": ["hello"]}]},
+    {"response": "hello world"},
+)
+# {'ifeval_strict': 1.0, 'ifeval_loose': 1.0}
+```
+
+## Auto-wired datasets
+
+| CLI name | Dataset |
+|----------|---------|
+| `ifeval` | IFEval |
+
+## Supported instruction types
+
+The evaluator dispatches each instruction ID to a dedicated checker method. All 19 supported types are listed below.
+
+### Keyword constraints
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `keywords:existence` | All specified keywords must appear in the response | `keywords: list[str]` |
+| `keywords:forbidden_words` | None of the specified words may appear | `forbidden_words: list[str]` |
+| `keywords:frequency` | A keyword must appear at least / at most / exactly N times | `keyword: str`, `frequency: int`, `relation: str` |
+| `keywords:letter_frequency` | A specific letter must appear at least / at most / exactly N times | `letter: str`, `let_frequency: int`, `let_relation: str` |
+
+### Length constraints
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `length_constraints:number_words` | Response must have at least / at most / exactly N words | `num_words: int`, `relation: str` |
+| `length_constraints:number_sentences` | Response must have at least / at most / exactly N sentences | `num_sentences: int`, `relation: str` |
+| `length_constraints:number_paragraphs` | Response must have at least N paragraphs (double-newline separated) | `num_paragraphs: int` |
+
+### Format constraints
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `detectable_format:json_format` | Response must be valid JSON | — |
+| `detectable_format:number_bullet_points` | Response must have at least N bullet points (`*`, `-`, or `•`) | `num_bullets: int` |
+| `detectable_format:title` | Response must contain a title in `<<double angle brackets>>` | — |
+| `detectable_format:constrained_response` | Response (stripped) must exactly equal one of the allowed strings | `constrained_response: list[str]` |
+
+### Content constraints
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `detectable_content:number_placeholders` | Response must contain at least N `[placeholder]` patterns | `num_placeholders: int` |
+| `detectable_content:postscript` | Response must contain the postscript marker (default `P.S.`) | `postscript_marker: str` |
+
+### Punctuation
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `punctuation:no_comma` | Response must contain no commas | — |
+
+### Case constraints
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `change_case:english_capital` | Every word must start with an uppercase letter | — |
+| `change_case:english_lowercase` | Entire response must be lowercase | — |
+
+### Start/end constraints
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `startend:end_checker` | Response must end with the specified phrase | `end_phrase: str` |
+
+### Combination constraints
+
+| Instruction ID | Description | kwargs |
+|----------------|-------------|--------|
+| `combination:repeat_prompt` | Response must contain the original prompt verbatim | `prompt_to_repeat: str` |
+| `combination:two_responses` | Response must contain `******` as a separator between two responses | — |

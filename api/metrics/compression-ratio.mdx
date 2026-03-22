@@ -1,0 +1,76 @@
+---
+title: "CompressionRatio"
+description: "How much a system shrinks (or expands) the context window."
+---
+
+`CompressionRatio` measures the change in token count between the input context
+and the output produced by a system.
+
+```python
+from context_bench.metrics import CompressionRatio
+```
+
+## Constructor parameters
+
+`CompressionRatio` takes no constructor parameters.
+
+## Formula
+
+```
+compression_ratio = 1 - (total_output_tokens / total_input_tokens)
+```
+
+A **positive** value means the system compressed the context — the output is
+shorter than the input. A **negative** value means the system expanded it.
+
+| Value | Meaning |
+|-------|---------|
+| `0.5` | Output is 50% shorter than input |
+| `0.0` | No change in token count |
+| `-0.3` | Output is 30% longer than input |
+
+## Return value
+
+`compute()` returns a `dict[str, float]` with the following keys:
+
+<ResponseField name="compression_ratio" type="float">
+  `1 - (total_output_tokens / total_input_tokens)`. Returns `0.0` when there
+  are no input tokens.
+</ResponseField>
+
+<ResponseField name="mean_input_tokens" type="float">
+  Average number of input tokens per example.
+</ResponseField>
+
+<ResponseField name="mean_output_tokens" type="float">
+  Average number of output tokens per example.
+</ResponseField>
+
+## Usage
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import CompressionRatio
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[CompressionRatio()],
+)
+summary = result.summary["my-system"]
+print(summary["compression_ratio"])    # e.g. 0.42
+print(summary["mean_input_tokens"])    # e.g. 3200.0
+print(summary["mean_output_tokens"])   # e.g. 1856.0
+```
+
+## When it is enabled
+
+`CompressionRatio` is included in every CLI run by default. No flags are needed.
+
+<Note>
+  Token counts are recorded by the system under test and stored on each `EvalRow`.
+  The default tokenizer is `tiktoken` (`cl100k_base`). Swap it via
+  `context_bench.utils.tokens`.
+</Note>

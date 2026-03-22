@@ -1,0 +1,189 @@
+---
+title: "Memory system evaluation"
+description: "Benchmark stateful memory systems on long-conversation QA datasets with the context-bench memory subcommand."
+---
+
+The `context-bench memory` subcommand evaluates systems that maintain state across a conversation: they ingest a conversation history, then answer questions about it. Unlike the standard proxy benchmark, memory systems are stateful — each conversation gets a fresh reset before ingestion.
+
+## What memory systems are
+
+A memory system manages what the LLM remembers from a long conversation. Instead of stuffing the entire history into the context window, a memory system may compress, index, or selectively retrieve facts before answering each question.
+
+context-bench measures F1 against ground-truth answers and tracks how many tokens each system uses per query.
+
+## The MemorySystem protocol
+
+Implement these three methods — no subclassing needed:
+
+```python
+from typing import Any, Protocol
+
+class MemorySystem(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    def reset(self) -> None:
+        """Clear all stored memory. Called once before each conversation."""
+        ...
+
+    def ingest(self, turns: list[dict[str, Any]]) -> None:
+        """Store a conversation history.
+
+        Args:
+            turns: List of {"role": "user"|"assistant", "content": str} dicts
+                   in chronological order.
+        """
+        ...
+
+    def query(self, question: str) -> str:
+        """Answer a question using stored memory.
+
+        Returns:
+            The system's answer string.
+        """
+        ...
+```
+
+The runner calls `reset()` before each conversation, `ingest()` to load the history, and then `query()` for each QA pair in that conversation.
+
+## Built-in memory systems
+
+| Name | Description |
+|------|-------------|
+| `naive` | Stuffs the full conversation history into the prompt. Baseline — every system claims to beat this. |
+| `embedding` | Embeds turns with `all-MiniLM-L6-v2` and retrieves the top-k most relevant chunks via cosine similarity. |
+| `rlm` | DSPy-based retrieval with LanceDB vector storage and DuckDB for structured queries. |
+| `mem0` | Uses the [mem0ai](https://mem0.ai/) package for memory management. Requires `pip install context-bench[mem0]`. |
+| `zep` | Uses [graphiti-core](https://github.com/getzep/graphiti) for temporal knowledge graph memory. Requires `pip install context-bench[zep]`. |
+
+## Available datasets
+
+| Name | Description |
+|------|-------------|
+| `locomo` | Long-conversation memory benchmark. Includes `single_hop`, `multi_hop`, `temporal`, and `open_domain` QA types. |
+| `longmemeval` | Long-memory evaluation with variants `s`, `m`, and `oracle`. |
+
+## CLI examples
+
+<Steps>
+  <Step title="Single system">
+    Evaluate the naive baseline on LoCoMo:
+
+    ```bash
+    context-bench memory \
+      --system naive \
+      --relay http://localhost:7878 \
+      --dataset locomo
+    ```
+  </Step>
+
+  <Step title="Compare multiple systems">
+    Run `naive` and `embedding` side by side:
+
+    ```bash
+    context-bench memory \
+      --system naive \
+      --system embedding \
+      --relay http://localhost:7878 \
+      --dataset locomo -n 20
+    ```
+  </Step>
+
+  <Step title="Filter QA types">
+    Evaluate only temporal and multi-hop questions:
+
+    ```bash
+    context-bench memory \
+      --system naive \
+      --relay http://localhost:7878 \
+      --qa-types temporal,multi_hop
+    ```
+  </Step>
+
+  <Step title="Limit conversations">
+    Cap the number of conversations to evaluate:
+
+    ```bash
+    context-bench memory \
+      --system naive \
+      --system embedding \
+      --relay http://localhost:7878 \
+      -n 20
+    ```
+  </Step>
+</Steps>
+
+## Output
+
+The table output includes both a top-level summary and a per-QA-type breakdown:
+
+```
+| System    | mean_score |
+|-----------|------------|
+| naive     | 0.4120     |
+| embedding | 0.5340     |
+
+## Per-QA-Type Breakdown
+
+| System    | multi_hop | open_domain | single_hop | temporal |
+|-----------|-----------|-------------|------------|----------|
+| naive     | 0.3210    | 0.4800      | 0.5100     | 0.3670   |
+| embedding | 0.4450    | 0.6020      | 0.6310     | 0.4120   |
+```
+
+The per-QA-type breakdown is automatically enabled when LoCoMo data is loaded.
+
+## CLI reference
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--system` | *(required)* | Memory system to evaluate. Repeatable. One of: `naive`, `embedding`, `rlm`, `mem0`, `zep`. |
+| `--relay` | *(required)* | OpenAI-compatible relay URL for LLM calls. |
+| `--dataset` | `locomo` | Dataset to evaluate on: `locomo` or `longmemeval`. Repeatable. |
+| `--model` | `claude-haiku-4-5-20251001` | Model name. |
+| `-n` | all | Max conversations to evaluate. |
+| `--qa-types` | all | Comma-separated QA types to filter, e.g. `temporal,multi_hop`. |
+| `--output` | `table` | Output format: `table`, `json`, or `html`. |
+| `--score-field` | `f1` | Score field to report. |
+| `--seed` | `42` | Random seed for dataset splits. |
+
+## Optional dependencies
+
+<Warning>
+  `mem0` and `zep` require extra packages. Install them before use:
+
+  ```bash
+  pip install "context-bench[mem0]"   # for --system mem0
+  pip install "context-bench[zep]"    # for --system zep
+  ```
+</Warning>
+
+## Python API
+
+Use `evaluate_memory()` directly for programmatic access:
+
+```python
+from context_bench.memory_runner import evaluate_memory
+from context_bench.systems.naive import NaiveSystem
+from context_bench.systems.embedding import EmbeddingSystem
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics.per_qa_type import PerQATypeMetric
+from context_bench.datasets.memory import locomo
+
+systems = [
+    NaiveSystem(base_url="http://localhost:7878", model="claude-haiku-4-5-20251001"),
+    EmbeddingSystem(base_url="http://localhost:7878", model="claude-haiku-4-5-20251001"),
+]
+
+dataset = locomo(n=20, qa_types=["temporal", "multi_hop"])
+
+result = evaluate_memory(
+    systems=systems,
+    dataset=dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[PerQATypeMetric(score_field="f1")],
+    max_examples=20,
+)
+
+print(result.summary)
+```

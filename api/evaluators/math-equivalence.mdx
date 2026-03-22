@@ -1,0 +1,81 @@
+---
+title: 'MathEquivalence'
+description: 'Checks semantic equivalence of mathematical answers with LaTeX normalization and numeric comparison. Auto-wired for MATH, GSM8K, and MGSM.'
+---
+
+`MathEquivalence` compares mathematical answers by normalizing LaTeX notation and then attempting numeric comparison. It is implemented in pure Python with no external math libraries.
+
+```python
+from context_bench.evaluators import MathEquivalence
+```
+
+## Constructor
+
+`MathEquivalence` takes no constructor parameters.
+
+```python
+ev = MathEquivalence()
+```
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Must contain an `"answer"` key with the ground-truth mathematical expression or value.
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the model's answer string. If the response contains `\boxed{...}`, the content of the box is extracted and used as the answer.
+</ParamField>
+
+### Return values
+
+<ResponseField name="math_equiv" type="float" required>
+  `1.0` if the reference and response are mathematically equivalent, otherwise `0.0`.
+</ResponseField>
+
+<Note>
+  If `answer` is empty, returns `math_equiv: 1.0`. If `response` is empty, returns `math_equiv: 0.0`.
+</Note>
+
+## Examples
+
+```python
+from context_bench.evaluators import MathEquivalence
+ev = MathEquivalence()
+ev.score({"answer": r"\frac{1}{2}"}, {"response": "0.5"})
+# {'math_equiv': 1.0}
+ev.score({"answer": "42"}, {"response": r"The answer is $\boxed{42}$."})
+# {'math_equiv': 1.0}
+```
+
+## Auto-wired datasets
+
+`MathEquivalence` is automatically applied when any of the following datasets are selected:
+
+| CLI name | Dataset |
+|----------|---------|
+| `math` | MATH (competition mathematics) |
+| `gsm8k` | GSM8K (grade school math) |
+| `mgsm` | MGSM (multilingual math; configurable, e.g. `mgsm:de`) |
+
+## Implementation notes
+
+Equivalence is checked in a cascade — the first matching condition returns `True`:
+
+1. **Boxed extraction** — if the response contains `\boxed{...}`, the content is extracted using brace-depth matching before any other processing.
+2. **Case-insensitive string match** — whitespace-normalized strings are compared directly.
+3. **LaTeX normalization** — both strings are normalized and compared again. Normalization handles:
+   - `\frac{a}{b}` → `(a)/(b)`
+   - `\text{}`, `\mathrm{}`, `\textbf{}` → plain text
+   - `\left`, `\right` → removed
+   - `\sqrt{x}` → `sqrt(x)`
+   - `\cdot`, `\times` → `*`
+   - `\pi` → `pi`, `\infty` → `inf`
+   - `\pm` → `+-`
+   - LaTeX spacing commands removed
+4. **Numeric comparison** — if both normalized strings parse as numbers (including fractions `a/b` and percentages `x%`), they are compared with a relative tolerance of `1e-6`.
+5. **Numeric comparison on original strings** — the same numeric comparison is attempted on the pre-normalization strings as a final fallback.

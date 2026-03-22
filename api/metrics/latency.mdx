@@ -1,0 +1,66 @@
+---
+title: "Latency"
+description: "Per-example wall-clock timing statistics: mean, median, p95, and p99."
+---
+
+`Latency` reports statistical summaries of per-example latency recorded during a
+benchmark run. Latency is measured as wall-clock time from when the system
+receives an example to when it returns a result.
+
+```python
+from context_bench.metrics import Latency
+```
+
+## Constructor parameters
+
+`Latency` takes no constructor parameters.
+
+## Return value
+
+`compute()` returns a `dict[str, float]` with the following keys. All values are
+in **seconds**.
+
+<ResponseField name="latency_mean" type="float">
+  Arithmetic mean of per-example latency in seconds.
+</ResponseField>
+
+<ResponseField name="latency_median" type="float">
+  Median (50th percentile) latency in seconds.
+</ResponseField>
+
+<ResponseField name="latency_p95" type="float">
+  95th percentile latency in seconds. Useful for characterizing tail latency.
+</ResponseField>
+
+<ResponseField name="latency_p99" type="float">
+  99th percentile latency in seconds. Reflects worst-case behavior under load.
+</ResponseField>
+
+## Usage
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import Latency
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[Latency()],
+)
+summary = result.summary["my-system"]
+print(summary["latency_mean"])    # e.g. 1.23
+print(summary["latency_median"])  # e.g. 1.05
+print(summary["latency_p95"])     # e.g. 2.87
+print(summary["latency_p99"])     # e.g. 4.11
+```
+
+## When it is enabled
+
+`Latency` is included in every CLI run by default.
+
+<Note>
+  When using `max_workers` for concurrent evaluation, wall-clock time per example
+  reflects execution time of the system call itself, not queue wait time.
+</Note>

@@ -1,0 +1,197 @@
+---
+title: "evaluate()"
+description: "Run a full evaluation: apply systems to a dataset, score with evaluators, and aggregate with metrics."
+---
+
+```python
+from context_bench import evaluate
+```
+
+## Signature
+
+```python
+def evaluate(
+    systems: list[System],
+    dataset: Iterable[dict],
+    evaluators: list[Evaluator],
+    metrics: list[Metric] | None = None,
+    max_examples: int | None = None,
+    progress: bool = True,
+    text_fields: list[str] | None = None,
+    max_workers: int | None = None,
+    cache_dir: str | None = None,
+) -> EvalResult:
+```
+
+## Parameters
+
+<ParamField path="systems" type="list[System]" required>
+  A list of objects implementing the `System` protocol. Each system must expose a `.name` string property and a `.process(example) -> dict` method. For multi-turn datasets, systems may also implement `.process_conversation(turns) -> list[dict]`.
+</ParamField>
+
+<ParamField path="dataset" type="Iterable[dict]" required>
+  Any iterable of example dicts. Each dict should have an `"id"` key for stable cache lookups and a `"context"` key containing the text to process. Additional keys (`"question"`, `"answer"`, `"turns"`, etc.) are passed through to evaluators unchanged.
+</ParamField>
+
+<ParamField path="evaluators" type="list[Evaluator]" required>
+  A list of objects implementing the `Evaluator` protocol. Each evaluator must expose a `.name` string property and a `.score(original, processed) -> dict[str, float]` method.
+</ParamField>
+
+<ParamField path="metrics" type="list[Metric] | None" default="None">
+  Optional list of objects implementing the `Metric` protocol. Each metric must expose a `.name` string property and a `.compute(rows) -> dict[str, float]` method. If `None`, no aggregation metrics are computed and `EvalResult.summary` will contain empty dicts per system.
+</ParamField>
+
+<ParamField path="max_examples" type="int | None" default="None">
+  Limit the number of examples processed. Useful for quick smoke tests. If `None`, all examples in `dataset` are evaluated.
+</ParamField>
+
+<ParamField path="progress" type="bool" default="True">
+  Show progress during evaluation. Uses `rich` progress bars when the package is installed, otherwise falls back to plain stderr output every 10 examples.
+</ParamField>
+
+<ParamField path="text_fields" type="list[str] | None" default="None">
+  List of dict keys to count tokens for. If `None`, tokens are counted across all string values in the example dict. Pass a specific list (e.g. `["context", "response"]`) to restrict token counting to those fields.
+</ParamField>
+
+<ParamField path="max_workers" type="int | None" default="None">
+  Maximum number of concurrent threads for processing examples. If `None` or `1`, examples are processed sequentially. Values greater than `1` use a `ThreadPoolExecutor`. Concurrent mode is recommended when your system makes HTTP requests and latency is the bottleneck.
+</ParamField>
+
+<ParamField path="cache_dir" type="str | None" default="None">
+  Directory for result caching. When provided, completed `EvalRow` results are saved to disk and reused on subsequent runs with the same configuration. This enables resuming interrupted evaluations without re-running completed examples.
+</ParamField>
+
+## Returns
+
+Returns an [`EvalResult`](/api/eval-result) containing all per-row scores and summary statistics.
+
+## Example
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PassRate, Latency
+
+kompact = OpenAIProxy(
+    "http://localhost:7878",
+    model="claude-sonnet-4-5-20250929",
+    name="kompact",
+)
+
+result = evaluate(
+    systems=[kompact],
+    dataset=your_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        PassRate(score_field="f1"),
+        Latency(),
+    ],
+    max_workers=4,       # concurrent execution
+    cache_dir=".cache/", # resume on re-run
+)
+
+print(result.summary)
+```
+
+### Comparing multiple systems
+
+Pass more than one system to get a side-by-side comparison in a single call:
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, CompressionRatio, CostOfPass
+
+kompact = OpenAIProxy("http://localhost:7878", name="kompact")
+headroom = OpenAIProxy("http://localhost:8787", name="headroom")
+
+result = evaluate(
+    systems=[kompact, headroom],
+    dataset=your_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        CompressionRatio(),
+        CostOfPass(score_field="f1", threshold=0.7),
+    ],
+)
+
+# Access per-system summaries
+for system_name, stats in result.summary.items():
+    print(system_name, stats)
+```
+
+### Custom system
+
+Any class that exposes `.name` and `.process()` works — no subclassing required:
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, Latency
+
+class MyCompressor:
+    name = "my-compressor"
+
+    def process(self, example):
+        compressed = my_compress(example["context"])
+        return {**example, "context": compressed, "response": compressed}
+
+result = evaluate(
+    systems=[MyCompressor()],
+    dataset=my_data,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1"), Latency()],
+)
+```
+
+## Auto-wiring evaluators in the CLI
+
+When you use the `context-bench` CLI, evaluators are **auto-wired** based on the datasets you select — you do not need to specify them manually:
+
+| Evaluator | Auto-wired for |
+|---|---|
+| `AnswerQuality` | All datasets |
+| `SummarizationQuality` | Summarization datasets |
+| `MultipleChoiceAccuracy` | MMLU, ARC, GPQA, HellaSwag, WinoGrande, MMLU-Pro |
+| `CodeExecution` | HumanEval, MBPP |
+| `MathEquivalence` | MATH, GSM8K, MGSM |
+| `NLILabelMatch` | ContractNLI, SciFact |
+| `IFEvalChecker` | IFEval |
+| `LLMJudge` | Any dataset via `--judge-url` |
+
+When using the Python API directly, you must pass evaluators explicitly in the `evaluators` argument.
+
+---
+
+## evaluate_memory()
+
+For systems implementing the `MemorySystem` protocol (ingest + query loop), use `evaluate_memory` instead:
+
+```python
+from context_bench import evaluate_memory
+```
+
+```python
+def evaluate_memory(
+    systems: list[MemorySystem],
+    dataset: Iterable[Any],
+    evaluators: list[Evaluator],
+    metrics: list[Metric] | None = None,
+    max_examples: int | None = None,
+    progress: bool = True,
+) -> EvalResult:
+```
+
+The memory evaluation loop per example is:
+
+1. `system.reset()` — clear state
+2. `system.ingest(example.items)` — load conversation turns or document chunks
+3. For each query: `system.query(query.question)` → score against ground-truth answer
+
+`evaluate_memory` accepts both the typed `BenchmarkExample` format and the legacy dict format with `"turns"` and `"qa_pairs"` keys. It returns the same [`EvalResult`](/api/eval-result) as `evaluate()`.
+
+<Note>
+  `evaluate_memory` does not support `max_workers` or `cache_dir`. For high-throughput memory evaluation, run multiple systems sequentially and combine results manually.
+</Note>

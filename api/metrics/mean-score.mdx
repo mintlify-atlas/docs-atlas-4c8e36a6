@@ -1,0 +1,69 @@
+---
+title: "MeanScore"
+description: "Average score across all evaluated examples."
+---
+
+`MeanScore` computes the arithmetic mean of a named score field over every `EvalRow` in a run. It is the primary quality signal for most benchmarks.
+
+```python
+from context_bench.metrics import MeanScore
+```
+
+## Constructor parameters
+
+<ParamField path="score_field" type="string" default="score">
+  Name of the score key to average. Must match a key emitted by an evaluator's
+  `score()` method — for example `"f1"`, `"exact_match"`, or `"mc_accuracy"`.
+</ParamField>
+
+## Return value
+
+`compute()` returns a `dict[str, float]` with the following key:
+
+<ResponseField name="mean_score" type="float">
+  Mean value of `score_field` across all examples. Range `[0.0, 1.0]` for
+  standard evaluators. Returns `0.0` when the row list is empty.
+</ResponseField>
+
+## Usage
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1")],
+)
+print(result.summary["my-system"]["mean_score"])  # e.g. 0.742
+```
+
+<CodeGroup>
+
+```python f1 (default)
+MeanScore(score_field="f1")
+```
+
+```python exact match
+MeanScore(score_field="exact_match")
+```
+
+```python multiple-choice accuracy
+MeanScore(score_field="mc_accuracy")
+```
+
+</CodeGroup>
+
+## When it is enabled
+
+`MeanScore` is included in every CLI run by default. The CLI flag `--score-field`
+controls which field it reads (default: `f1`).
+
+<Note>
+  `score_field` must match a key produced by an evaluator that is also registered
+  for the run. If the field is absent on a row, that row contributes `0.0` to the
+  mean.
+</Note>

@@ -1,0 +1,80 @@
+---
+title: 'NLILabelMatch'
+description: 'Extracts a classification label from the model response and checks it against the reference label with alias mapping. Auto-wired for ContractNLI and SciFact.'
+---
+
+`NLILabelMatch` evaluates natural language inference and fact-verification tasks by extracting the predicted classification label from free-form model output and comparing it to the ground-truth label. A built-in alias table maps common variants (e.g. `"yes"` → `"entailment"`) to canonical forms before comparison.
+
+```python
+from context_bench.evaluators import NLILabelMatch
+```
+
+## Constructor
+
+`NLILabelMatch` takes no constructor parameters.
+
+```python
+ev = NLILabelMatch()
+```
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Must contain an `"answer"` key with the reference label string.
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the model's output string.
+</ParamField>
+
+### Return values
+
+<ResponseField name="nli_accuracy" type="float" required>
+  `1.0` if the extracted label matches the reference label (after alias normalization), otherwise `0.0`.
+</ResponseField>
+
+<Note>
+  If `answer` is empty, returns `nli_accuracy: 1.0`. If `response` is empty, returns `nli_accuracy: 0.0`.
+</Note>
+
+## Example
+
+```python
+from context_bench.evaluators import NLILabelMatch
+ev = NLILabelMatch()
+ev.score({"answer": "Entailment"}, {"response": "Yes, this is true."})
+# {'nli_accuracy': 1.0}  ("yes" maps to "entailment")
+```
+
+## Auto-wired datasets
+
+`NLILabelMatch` is automatically applied when any of the following datasets are selected:
+
+| CLI name | Dataset |
+|----------|---------|
+| `contract-nli` | ContractNLI (legal NLI) |
+| `scifact` | SciFact (scientific claim verification) |
+
+## Label alias mapping
+
+Both the reference and response are normalized through the same alias table before comparison:
+
+| Input | Canonical label |
+|-------|-----------------|
+| `entailment`, `entail`, `yes`, `true` | `entailment` |
+| `contradiction`, `contradict`, `no`, `false` | `contradiction` |
+| `not mentioned`, `not_mentioned`, `neutral`, `unknown`, `neither` | `not mentioned` |
+| `supports`, `support` | `supports` |
+| `refutes`, `refute` | `refutes` |
+
+## Implementation notes
+
+Label extraction from the response uses a three-stage cascade:
+
+1. **Exact match** — if the entire (lowercased) response is a known alias, return its canonical form immediately.
+2. **Structured pattern** — searches for phrases like `"answer is: entailment"`, `"label: supports"`, `"therefore, the verdict is contradiction"`, and normalizes the captured word.
+3. **Last-occurrence scan** — scans the entire response for any known alias keyword and returns the canonical form of the **last** occurrence, since conclusions typically appear at the end of a response.

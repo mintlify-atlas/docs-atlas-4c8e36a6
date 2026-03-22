@@ -1,0 +1,160 @@
+---
+title: "Custom datasets"
+description: "Use your own data with context-bench via local JSONL files or the Python API."
+---
+
+context-bench accepts any `Iterable[dict]` as a dataset. You can load data from
+a local file, build it in memory, or register a named loader that behaves like a
+built-in dataset.
+
+## Required fields
+
+Every example dict must have at minimum:
+
+<ParamField path="id" type="string | int" required>
+  Unique identifier for the example. Used for deduplication and result caching.
+</ParamField>
+
+<ParamField path="context" type="string" required>
+  The text that will be passed through the system under test. This is the input
+  the system compresses, summarizes, or otherwise transforms.
+</ParamField>
+
+## Optional evaluator fields
+
+Evaluators look for additional fields to compute their scores. Include the fields
+that match the evaluators you use:
+
+| Field | Used by | Purpose |
+|-------|---------|----------|
+| `answer` | `AnswerQuality`, `MathEquivalence` | Ground-truth answer string |
+| `question` | `AnswerQuality`, `LLMJudge` | Question text sent to the system |
+| `correct_letter` | `MultipleChoiceAccuracy` | Expected choice letter (`A`–`J`) |
+| `choices` | `MultipleChoiceAccuracy` | List of answer choices |
+| `test` | `CodeExecution` | Test code to verify the response |
+| `entry_point` | `CodeExecution` | Function name to call in the test |
+| `instruction_id_list` | `IFEvalChecker` | List of constraint IDs |
+| `kwargs` | `IFEvalChecker` | Per-constraint keyword arguments |
+| `dataset` | `PerDatasetBreakdown` | Dataset label for per-dataset slicing |
+
+## Local JSONL files
+
+Pass a path ending in `.jsonl` directly to `--dataset`. Each line must be valid
+JSON.
+
+```bash
+context-bench --proxy http://localhost:7878 --dataset ./my_data.jsonl
+```
+
+Example JSONL file:
+
+```json
+{"id": "q1", "context": "Alice went to Paris in 2023.", "question": "When did Alice go to Paris?", "answer": "2023"}
+{"id": "q2", "context": "The Eiffel Tower is 330 meters tall.", "question": "How tall is the Eiffel Tower?", "answer": "330 meters"}
+{"id": "q3", "context": "Python was created by Guido van Rossum.", "question": "Who created Python?", "answer": "Guido van Rossum"}
+```
+
+You can also load JSONL files from the Python API:
+
+```python
+from context_bench.datasets.local import load_jsonl
+
+dataset = load_jsonl("./my_data.jsonl", n=100)  # n limits the number of examples
+```
+
+## Python API
+
+Pass any `list[dict]` as the `dataset` argument to `evaluate()`:
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore
+
+my_dataset = [
+    {
+        "id": "ex-1",
+        "context": "The speed of light is approximately 299,792 km/s.",
+        "question": "What is the speed of light?",
+        "answer": "299,792 km/s",
+    },
+    {
+        "id": "ex-2",
+        "context": "Water boils at 100°C at sea level.",
+        "question": "At what temperature does water boil?",
+        "answer": "100°C",
+    },
+]
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1")],
+)
+print(result.summary)
+```
+
+## Registering a named dataset
+
+To make your dataset available by name (like a built-in), register a loader
+function with the registry:
+
+```python
+from context_bench.registry import registry
+
+def load_my_dataset(n: int | None = None) -> list[dict]:
+    """Load examples from your data source."""
+    examples = [
+        {"id": "1", "context": "...", "answer": "..."},
+        # ...
+    ]
+    return examples[:n] if n else examples
+
+registry.register("dataset", "my_dataset", load_my_dataset)
+```
+
+After registration, `my_dataset` can be referenced anywhere a built-in name is
+accepted:
+
+```python
+from context_bench.__main__ import _load_dataset
+
+examples = _load_dataset("my_dataset", max_examples=50)
+```
+
+<Tip>
+  Tag each example with `example["dataset"] = "my_dataset"` before passing to
+  `evaluate()`. This enables `PerDatasetBreakdown` to slice scores correctly
+  when you mix your dataset with built-in ones.
+</Tip>
+
+## Minimal example
+
+A single-file custom dataset that scores an extractive QA system:
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PassRate
+
+class Truncator:
+    """Trivial system that keeps only the first 200 characters."""
+    name = "truncator"
+
+    def process(self, example: dict) -> dict:
+        return {**example, "context": example["context"][:200]}
+
+dataset = [
+    {"id": "1", "context": "Jupiter is the largest planet in the solar system, with a mass more than twice that of all other planets combined.", "question": "What is the largest planet?", "answer": "Jupiter"},
+    {"id": "2", "context": "The Amazon River is the largest river by discharge volume of water in the world.", "question": "Which river has the largest discharge?", "answer": "Amazon River"},
+]
+
+result = evaluate(
+    systems=[Truncator()],
+    dataset=dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1"), PassRate(threshold=0.5, score_field="f1")],
+)
+print(result.summary)
+```

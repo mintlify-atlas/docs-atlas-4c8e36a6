@@ -1,0 +1,131 @@
+---
+title: "Built-in datasets"
+description: "Full reference for all 42 datasets included with context-bench."
+---
+
+context-bench ships with 42 dataset loaders organized into 10 categories. All
+HuggingFace-backed datasets require the `datasets` extra:
+
+```bash
+uv sync --extra datasets
+```
+
+Pass any dataset to the CLI with `--dataset <name>`. Multiple datasets can be
+combined in a single run:
+
+```bash
+context-bench \
+  --proxy http://localhost:7878 \
+  --dataset hotpotqa --dataset gsm8k --dataset mmlu
+```
+
+## Multi-config datasets
+
+Some datasets have sub-configurations selectable with a `:config` suffix:
+
+| Dataset | Example | Notes |
+|---------|---------|-------|
+| `mmlu` | `--dataset mmlu:anatomy` | Any MMLU subject |
+| `mgsm` | `--dataset mgsm:de` | Language code (de, ja, zh, …) |
+| `longbench` | `--dataset longbench:qasper` | Any LongBench task |
+| `infinitebench` | `--dataset infinitebench:en_qa` | Any InfiniteBench task |
+| `bbh` | `--dataset bbh:causal_judgement` | Any BIG-Bench Hard task |
+
+---
+
+## QA & Reading Comprehension
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `hotpotqa` | [HotpotQA](https://hotpotqa.github.io/) | Multi-hop QA |
+| `natural-questions` | [Natural Questions](https://ai.google.com/research/NaturalQuestions) | Open-domain QA |
+| `musique` | [MuSiQue](https://allenai.org/data/musique) | Multi-hop QA (answerable subset) |
+| `narrativeqa` | [NarrativeQA](https://github.com/deepmind/narrativeqa) | Document summaries |
+| `triviaqa` | [TriviaQA](https://nlp.cs.washington.edu/triviaqa/) | Search context QA |
+| `frames` | [FRAMES](https://huggingface.co/datasets/google/frames-benchmark) | Multi-hop factual reasoning |
+| `quality` | [QuALITY](https://github.com/nyu-mll/quality) | Long-document multiple-choice QA |
+| `qasper` | [QASPer](https://allenai.org/data/qasper) | Scientific paper QA |
+
+## Knowledge & Multiple Choice
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `mmlu` | [MMLU](https://github.com/hendrycks/test) | 57 subjects; 4-choice; configurable (`mmlu:anatomy`) |
+| `mmlu-pro` | [MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | 10-choice harder variant |
+| `arc-challenge` | [ARC-Challenge](https://allenai.org/data/arc) | Science exam questions |
+| `truthfulqa` | [TruthfulQA](https://github.com/sylinrl/TruthfulQA) | Factuality (generation mode) |
+| `gpqa` | [GPQA Diamond](https://arxiv.org/abs/2311.12022) | Graduate-level QA (gated dataset) |
+| `hellaswag` | [HellaSwag](https://rowanzellers.com/hellaswag/) | Commonsense sentence completion |
+| `winogrande` | [WinoGrande](https://winogrande.allenai.org/) | Coreference resolution |
+
+## Reasoning & Math
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `gsm8k` | [GSM8K](https://github.com/openai/grade-school-math) | Grade school math word problems |
+| `drop` | [DROP](https://allennlp.org/drop) | Discrete reasoning over paragraphs |
+| `math` | [MATH](https://github.com/hendrycks/math) | Competition mathematics |
+| `mgsm` | [MGSM](https://arxiv.org/abs/2210.03057) | Multilingual math; configurable (`mgsm:de`, `mgsm:ja`) |
+| `bbh` | [BIG-Bench Hard](https://github.com/suzgunmirac/BIG-Bench-Hard) | 23 hard BIG-Bench tasks; configurable (`bbh:causal_judgement`) |
+
+## Code Generation
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `humaneval` | [HumanEval](https://github.com/openai/human-eval) | Execution-based; scored by `CodeExecution` (pass@1) |
+| `mbpp` | [MBPP](https://github.com/google-research/google-research/tree/master/mbpp) | Execution-based; scored by `CodeExecution` (pass@1) |
+
+## Summarization
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `multi-news` | [Multi-News](https://github.com/Alex-Fabbri/Multi-News) | Multi-document summarization |
+| `dialogsum` | [DialogSum](https://github.com/cylnlp/dialogsum) | Dialogue summarization |
+| `qmsum` | [QMSum](https://github.com/Yale-LILY/QMSum) | Query-based meeting summarization (via SCROLLS) |
+| `summscreenfd` | [SummScreenFD](https://github.com/mingdachen/SummScreen) | TV transcript summarization (via SCROLLS) |
+| `meetingbank` | [MeetingBank](https://meetingbank.github.io/) | Meeting transcript summarization |
+| `govreport` | [GovReport](https://gov-report-data.github.io/) | Government report summarization |
+
+<Note>
+  Summarization datasets auto-enable the `SummarizationQuality` evaluator, which
+  computes ROUGE-L precision, recall, and F1.
+</Note>
+
+## NLI & Fact Verification
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `contract-nli` | [ContractNLI](https://stanfordnlp.github.io/contract-nli/) | Legal NLI (via SCROLLS) |
+| `scifact` | [SciFact](https://github.com/allenai/scifact) | Scientific claim verification |
+
+## Instruction Following
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `ifeval` | [IFEval](https://arxiv.org/abs/2311.07911) | Programmatic constraint checking (19 constraint types) |
+| `alpaca-eval` | [AlpacaEval](https://tatsu-lab.github.io/alpaca_eval/) | 805 open-ended instructions; best used with `--judge-url` |
+
+## Multi-Turn
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `mt-bench` | [MT-Bench](https://arxiv.org/abs/2306.05685) | 80 two-turn conversations; requires `process_conversation()` |
+
+## Long Context
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `longbench` | [LongBench](https://github.com/THUDM/LongBench) | Multi-task long-context benchmark; configurable (`longbench:qasper`) |
+| `longbench-v2` | [LongBench v2](https://github.com/THUDM/LongBench) | Harder variant with more difficult tasks |
+| `infinitebench` | [InfiniteBench](https://github.com/OpenBMB/InfiniteBench) | 100K+ token contexts; configurable (`infinitebench:en_qa`) |
+| `nolima` | [NoLiMa](https://arxiv.org/abs/2502.05167) | Needle-in-a-haystack retrieval benchmark |
+
+## Agent Traces
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `bfcl` | [BFCL v3](https://gorilla.cs.berkeley.edu/leaderboard.html) | Function calling benchmark |
+| `apigen` | [APIGen](https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k) | Multi-turn tool use traces |
+| `swebench` | [SWE-bench](https://www.swebench.com/) | Full coding agent traces |
+| `swebench-verified` | [SWE-bench Verified](https://www.swebench.com/) | 500 validated problems |
+| `swebench-lite` | [SWE-bench Lite](https://www.swebench.com/) | 300-problem subset |

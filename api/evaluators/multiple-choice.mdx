@@ -1,0 +1,75 @@
+---
+title: 'MultipleChoiceAccuracy'
+description: 'Extracts the chosen letter (A–J) from a model response and checks it against the correct answer. Auto-wired for MMLU, ARC-Challenge, GPQA, HellaSwag, WinoGrande, and MMLU-Pro.'
+---
+
+`MultipleChoiceAccuracy` evaluates multiple-choice questions by extracting the letter selected by the model and comparing it to the ground-truth letter stored in the dataset example.
+
+```python
+from context_bench.evaluators import MultipleChoiceAccuracy
+```
+
+## Constructor
+
+`MultipleChoiceAccuracy` takes no constructor parameters.
+
+```python
+ev = MultipleChoiceAccuracy()
+```
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Must contain a `"correct_letter"` key (e.g. `"A"`, `"B"`) with the ground-truth answer letter.
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the model's output string.
+</ParamField>
+
+### Return values
+
+<ResponseField name="mc_accuracy" type="float" required>
+  `1.0` if the extracted letter matches `correct_letter`, otherwise `0.0`.
+</ResponseField>
+
+<Note>
+  Returns `0.0` if either `correct_letter` or `response` is missing or empty.
+</Note>
+
+## Example
+
+```python
+from context_bench.evaluators import MultipleChoiceAccuracy
+ev = MultipleChoiceAccuracy()
+ev.score({"correct_letter": "B"}, {"response": "The answer is B."})
+# {'mc_accuracy': 1.0}
+```
+
+## Auto-wired datasets
+
+`MultipleChoiceAccuracy` is automatically applied when any of the following datasets are selected:
+
+| CLI name | Dataset |
+|----------|---------|
+| `mmlu` | MMLU (4-choice, configurable per-subject) |
+| `arc-challenge` | ARC-Challenge |
+| `gpqa` | GPQA Diamond |
+| `hellaswag` | HellaSwag |
+| `winogrande` | WinoGrande |
+| `mmlu-pro` | MMLU-Pro (10-choice) |
+
+## Implementation notes
+
+The evaluator uses a cascade of regex patterns to extract the letter (A–J) from free-form model output:
+
+1. **Single letter** — if the entire stripped response is one character in `A–J`, use it directly.
+2. **Labeled pattern** — matches `"The answer is A"`, `"answer: B"`, `"choice is C"`, etc.
+3. **Parenthesized** — matches `(A)`, `(B)`, etc.
+4. **Fallback** — takes the first standalone word-boundary letter in `A–J` found anywhere in the response.
+
+If none of the patterns match, an empty string is returned and the score is `0.0`.

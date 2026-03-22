@@ -1,0 +1,81 @@
+---
+title: "CostOfPass"
+description: "Tokens spent per successful task completion."
+---
+
+`CostOfPass` measures efficiency by combining quality and token usage into a
+single number: how many output tokens does it take, on average, to produce one
+passing response?
+
+This metric is described in [arXiv:2504.13359](https://arxiv.org/abs/2504.13359).
+
+```python
+from context_bench.metrics import CostOfPass
+```
+
+## Constructor parameters
+
+<ParamField path="threshold" type="float" default="0.7">
+  Minimum score for an example to be counted as a pass.
+  Matches the semantics of `PassRate.threshold`.
+</ParamField>
+
+<ParamField path="score_field" type="string" default="score">
+  Name of the score key used to determine pass/fail.
+  Must match a key emitted by an evaluator — for example `"f1"` or `"mc_accuracy"`.
+</ParamField>
+
+## Formula
+
+```
+cost_of_pass = total_output_tokens / num_passing_examples
+```
+
+A **lower** value is better: the system spends fewer tokens to produce a correct
+response. If no examples pass, `cost_of_pass` is `inf`.
+
+## Return value
+
+`compute()` returns a `dict[str, float]` with the following keys:
+
+<ResponseField name="cost_of_pass" type="float">
+  Total output tokens divided by the number of passing examples.
+  Returns `inf` when zero examples pass.
+</ResponseField>
+
+<ResponseField name="num_passing" type="float">
+  Number of examples that met the pass threshold. Stored as `float` for
+  consistency with the summary dict type.
+</ResponseField>
+
+## Usage
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import CostOfPass, MeanScore
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        CostOfPass(threshold=0.7, score_field="f1"),
+    ],
+)
+summary = result.summary["my-system"]
+print(summary["cost_of_pass"])  # e.g. 1842.3  (tokens per pass)
+print(summary["num_passing"])   # e.g. 61.0
+```
+
+## When it is enabled
+
+`CostOfPass` is included in every CLI run by default. The `--threshold` flag
+controls the pass threshold and `--score-field` controls which field is read.
+
+<Tip>
+  Use `CostOfPass` alongside `ParetoRank` when comparing multiple systems.
+  A system with slightly lower quality but dramatically lower cost may still
+  be preferable in production.
+</Tip>

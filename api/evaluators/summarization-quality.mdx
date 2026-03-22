@@ -1,0 +1,91 @@
+---
+title: 'SummarizationQuality'
+description: 'ROUGE-L precision, recall, and F1 for summarization tasks. Auto-wired for multi-news, dialogsum, qmsum, summscreenfd, meetingbank, and govreport.'
+---
+
+`SummarizationQuality` measures the quality of generated summaries against reference summaries using ROUGE-L (Recall-Oriented Understudy for Gisting Evaluation — Longest Common Subsequence). It is implemented entirely in pure Python with no external dependencies.
+
+```python
+from context_bench.evaluators import SummarizationQuality
+```
+
+## Constructor
+
+`SummarizationQuality` takes no constructor parameters.
+
+```python
+ev = SummarizationQuality()
+```
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Must contain an `"answer"` key with the reference summary string.
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the generated summary string.
+</ParamField>
+
+### Return values
+
+<ResponseField name="rouge_l_precision" type="float" required>
+  Fraction of response tokens that appear in the LCS with the reference. `LCS_length / len(response_tokens)`.
+</ResponseField>
+
+<ResponseField name="rouge_l_recall" type="float" required>
+  Fraction of reference tokens covered by the LCS. `LCS_length / len(reference_tokens)`.
+</ResponseField>
+
+<ResponseField name="rouge_l_f1" type="float" required>
+  Harmonic mean of ROUGE-L precision and recall.
+</ResponseField>
+
+<Note>
+  If `answer` is empty, all three scores return `1.0`. If `response` is empty, all three return `0.0`.
+</Note>
+
+## Example
+
+```python
+from context_bench.evaluators import SummarizationQuality
+ev = SummarizationQuality()
+ev.score(
+    {"answer": "The committee approved the budget."},
+    {"response": "The budget was approved by the committee."},
+)
+# {'rouge_l_precision': 0.857, 'rouge_l_recall': 0.857, 'rouge_l_f1': 0.857}
+```
+
+## Auto-wired datasets
+
+`SummarizationQuality` is automatically applied when any of the following datasets are selected:
+
+| CLI name | Dataset |
+|----------|---------|
+| `multi-news` | Multi-News |
+| `dialogsum` | DialogSum |
+| `qmsum` | QMSum |
+| `summscreenfd` | SummScreenFD |
+| `meetingbank` | MeetingBank |
+| `govreport` | GovReport |
+
+## Implementation notes
+
+The algorithm uses a **space-optimized dynamic programming** implementation of the longest common subsequence (LCS), keeping only two rows in memory at a time to reduce memory usage on long documents:
+
+1. Both strings are lowercased and split on whitespace to produce token lists.
+2. The LCS length between the two token lists is computed with the DP algorithm.
+3. Precision, recall, and F1 are derived from the LCS length and the lengths of the two token lists.
+
+The standalone `rouge_l(prediction, reference)` function is also importable and returns the same three keys:
+
+```python
+from context_bench.evaluators.rouge import rouge_l
+rouge_l("the cat sat", "the cat sat on the mat")
+# {'rouge_l_precision': 1.0, 'rouge_l_recall': 0.5, 'rouge_l_f1': 0.667}
+```

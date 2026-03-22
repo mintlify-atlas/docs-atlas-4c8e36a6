@@ -1,0 +1,125 @@
+---
+title: "ParetoRank"
+description: "Rank systems on the quality-vs-cost Pareto frontier."
+---
+
+`ParetoRank` assigns each system a rank based on Pareto dominance across two
+dimensions: quality (e.g. `mean_score`) and cost (e.g. `cost_of_pass`). A system
+with rank `1` is Pareto-optimal — no other system is simultaneously better on
+both dimensions.
+
+```python
+from context_bench.metrics.token_stats import ParetoRank
+```
+
+## What is Pareto dominance?
+
+System B **dominates** system A when:
+
+- B's quality is at least as high as A's, **and**
+- B's cost is at most A's, **and**
+- B is strictly better on at least one of the two dimensions.
+
+A system's rank equals 1 plus the number of systems that dominate it. Rank `1`
+means no system dominates it — it sits on the Pareto frontier.
+
+| Rank | Meaning |
+|------|---------|
+| `1` | Pareto-optimal: best trade-off available |
+| `2` | One system dominates it |
+| `3` | Two systems dominate it |
+
+## Constructor parameters
+
+<ParamField path="quality_field" type="string" default="score">
+  Summary key to use as the quality dimension.
+</ParamField>
+
+<ParamField path="cost_field" type="string" default="cost_of_pass">
+  Summary key to use as the cost dimension. Lower is better.
+</ParamField>
+
+## `rank_systems()` static method
+
+Because Pareto ranking requires comparing all systems simultaneously,
+`ParetoRank` exposes a static method that operates on the full
+`EvalResult.summary` dict rather than on per-system rows.
+
+```python
+ParetoRank.rank_systems(
+    summary: dict[str, dict[str, float]],
+    quality_field: str = "mean_score",
+    cost_field: str = "cost_of_pass",
+) -> dict[str, int]
+```
+
+**Parameters**
+
+<ParamField path="summary" type="dict[str, dict[str, float]]" required>
+  The `EvalResult.summary` dict mapping system name → metric values.
+</ParamField>
+
+<ParamField path="quality_field" type="string" default="mean_score">
+  Key in each system's summary dict to use as the quality axis.
+</ParamField>
+
+<ParamField path="cost_field" type="string" default="cost_of_pass">
+  Key in each system's summary dict to use as the cost axis.
+</ParamField>
+
+**Returns** `dict[str, int]` — system name → rank (1 = best).
+
+## Usage
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import CostOfPass, MeanScore
+from context_bench.metrics.token_stats import ParetoRank
+
+result = evaluate(
+    systems=[system_a, system_b, system_c],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        CostOfPass(threshold=0.7, score_field="f1"),
+    ],
+)
+
+ranks = ParetoRank.rank_systems(
+    result.summary,
+    quality_field="mean_score",
+    cost_field="cost_of_pass",
+)
+for system, rank in ranks.items():
+    print(f"{system}: rank {rank}")
+# system_a: rank 1   (Pareto-optimal)
+# system_b: rank 2
+# system_c: rank 3
+
+# Attach ranks back to the summary for reporting
+for sys_name, rank in ranks.items():
+    result.summary[sys_name]["pareto_rank"] = float(rank)
+```
+
+## When it is enabled
+
+The CLI automatically runs `ParetoRank.rank_systems()` and writes `pareto_rank`
+into each system's summary when **two or more** `--proxy` flags are provided.
+
+```bash
+# ParetoRank is computed automatically here
+context-bench \
+  --proxy http://localhost:7878 --name kompact \
+  --proxy http://localhost:8787 --name baseline \
+  --dataset hotpotqa
+```
+
+When using the Python API, call `rank_systems()` manually after `evaluate()`.
+
+<Note>
+  The per-system `compute()` method returns `{"pareto_rank": 0.0}` as a
+  placeholder. Always use `rank_systems()` for the actual ranking — it is
+  the only method that sees all systems at once.
+</Note>

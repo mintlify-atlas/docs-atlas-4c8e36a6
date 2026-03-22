@@ -1,0 +1,213 @@
+---
+title: "Datasets"
+description: "A dataset is any Iterable[dict] with \"id\" and \"context\" keys. context-bench ships 42 built-in datasets across nine categories."
+---
+
+A dataset is the simplest possible interface: any `Iterable[dict[str, Any]]` where each dict has an `"id"` key and a `"context"` key. Built-in loaders, local JSONL files, and plain Python lists all work.
+
+## Required keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `id` | `str \| int` | Unique identifier for the example. Used for caching and deduplication. |
+| `context` | `str` | The text passed to the system. May be a document, prompt, conversation, or any string. |
+
+Optional keys such as `question`, `answer`, `choices`, and `correct_letter` are used by specific evaluators when present.
+
+## Built-in datasets (42)
+
+All HuggingFace datasets require the datasets extra:
+
+```bash
+uv sync --extra datasets
+```
+
+### QA & reading comprehension
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `hotpotqa` | HotpotQA | Multi-hop QA |
+| `natural-questions` | Natural Questions | Open-domain QA |
+| `musique` | MuSiQue | Multi-hop QA (answerable subset) |
+| `narrativeqa` | NarrativeQA | Document summaries |
+| `triviaqa` | TriviaQA | Search context QA |
+| `frames` | FRAMES | Multi-hop factual reasoning |
+| `quality` | QuALITY | Long-document multiple-choice QA |
+| `qasper` | QASPer | Scientific paper QA |
+
+### Knowledge & multiple choice
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `mmlu` | MMLU | 4-choice; configurable per-subject (`mmlu:anatomy`) |
+| `mmlu-pro` | MMLU-Pro | 10-choice harder variant |
+| `arc-challenge` | ARC-Challenge | Science exam questions |
+| `truthfulqa` | TruthfulQA | Factuality (generation) |
+| `gpqa` | GPQA Diamond | Graduate-level QA (gated) |
+| `hellaswag` | HellaSwag | Commonsense completion |
+| `winogrande` | WinoGrande | Coreference resolution |
+
+### Reasoning & math
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `gsm8k` | GSM8K | Grade school math |
+| `drop` | DROP | Discrete reasoning over paragraphs |
+| `math` | MATH | Competition mathematics |
+| `mgsm` | MGSM | Multilingual math; configurable (`mgsm:de`, `mgsm:ja`) |
+| `bbh` | BIG-Bench Hard | 23 hard BIG-Bench tasks; configurable (`bbh:causal_judgement`) |
+
+### Code generation
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `humaneval` | HumanEval | Execution-based (pass@1) |
+| `mbpp` | MBPP | Execution-based (pass@1) |
+
+### Summarization
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `multi-news` | Multi-News | Multi-document summarization |
+| `dialogsum` | DialogSum | Dialogue summarization |
+| `qmsum` | QMSum | Query-based meeting summarization (via SCROLLS) |
+| `summscreenfd` | SummScreenFD | TV transcript summarization (via SCROLLS) |
+| `meetingbank` | MeetingBank | Meeting transcript summarization |
+| `govreport` | GovReport | Government report summarization |
+
+### NLI & fact verification
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `contract-nli` | ContractNLI | Legal NLI (via SCROLLS) |
+| `scifact` | SciFact | Scientific claim verification |
+
+### Instruction following
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `ifeval` | IFEval | Programmatic constraint checking |
+| `alpaca-eval` | AlpacaEval | 805 instructions; best with `--judge-url` |
+
+### Multi-turn
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `mt-bench` | MT-Bench | 80 two-turn conversations; uses `process_conversation()` |
+
+### Long context
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `longbench` | LongBench | Configurable (`longbench:qasper`) |
+| `longbench-v2` | LongBench v2 | Harder variant |
+| `infinitebench` | InfiniteBench | 100K+ token contexts |
+| `nolima` | NoLiMa | Needle retrieval |
+
+### Agent traces
+
+| CLI name | Dataset | Notes |
+|----------|---------|-------|
+| `bfcl` | BFCL v3 | Function calling |
+| `apigen` | APIGen | Multi-turn tool use |
+| `swebench` | SWE-bench | Coding agent traces |
+| `swebench-verified` | SWE-bench Verified | 500 validated problems |
+| `swebench-lite` | SWE-bench Lite | 300-problem subset |
+
+## Multi-config datasets
+
+Some datasets expose multiple configurations. Select a configuration with a `:config` suffix:
+
+```bash
+# MMLU by subject
+context-bench --proxy http://localhost:7878 --dataset mmlu:anatomy
+
+# Multilingual math
+context-bench --proxy http://localhost:7878 --dataset mgsm:de
+context-bench --proxy http://localhost:7878 --dataset mgsm:ja
+
+# LongBench by task
+context-bench --proxy http://localhost:7878 --dataset longbench:qasper
+
+# BIG-Bench Hard by task
+context-bench --proxy http://localhost:7878 --dataset bbh:causal_judgement
+```
+
+In the Python API, pass the full name string:
+
+```python
+from context_bench.registry import load_dataset
+
+dataset = load_dataset("mmlu:anatomy")
+```
+
+## Local JSONL files
+
+Pass a file path instead of a dataset name to load a local JSONL file:
+
+```bash
+context-bench --proxy http://localhost:7878 --dataset ./my_data.jsonl
+```
+
+Each line must be a valid JSON object with at least `"id"` and `"context"` keys:
+
+```json
+{"id": "ex-001", "context": "The Eiffel Tower is in Paris.", "question": "Where is the Eiffel Tower?", "answer": "Paris"}
+{"id": "ex-002", "context": "Water boils at 100°C at sea level.", "question": "At what temperature does water boil?", "answer": "100°C"}
+```
+
+## Custom datasets
+
+Any iterable of dicts works. A plain Python list is a valid dataset:
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore
+
+my_dataset = [
+    {
+        "id": "q1",
+        "context": "The Eiffel Tower is located in Paris, France.",
+        "question": "Where is the Eiffel Tower?",
+        "answer": "Paris",
+    },
+    {
+        "id": "q2",
+        "context": "Python was created by Guido van Rossum in 1991.",
+        "question": "Who created Python?",
+        "answer": "Guido van Rossum",
+    },
+]
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1")],
+)
+```
+
+You can also register a loader function so the dataset is accessible by name from the CLI:
+
+```python
+from context_bench.registry import register_dataset
+
+def load_my_dataset(**kwargs):
+    return [
+        {"id": "q1", "context": "...", "answer": "..."},
+        ...
+    ]
+
+register_dataset("my-data", load_my_dataset)
+```
+
+Then use it like any built-in dataset:
+
+```bash
+context-bench --proxy http://localhost:7878 --dataset my-data
+```
+
+<Tip>
+The `dataset` field in each example dict is used by `PerDatasetBreakdown` to slice results per dataset. If you mix examples from multiple sources in one list, set `example["dataset"]` to tag them.
+</Tip>

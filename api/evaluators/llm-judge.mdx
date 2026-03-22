@@ -1,0 +1,102 @@
+---
+title: 'LLMJudge'
+description: 'Uses an external LLM to rate responses on a 1–5 scale, normalized to 0–1. Activated via --judge-url or used with alpaca-eval.'
+---
+
+`LLMJudge` scores open-ended responses by calling an external OpenAI-compatible LLM endpoint with an MT-Bench / AlpacaEval style evaluation prompt. The judge rates the response on a 1–5 scale, which is then normalized to a 0–1 float. It requires no additional Python dependencies beyond the standard library.
+
+```python
+from context_bench.evaluators import LLMJudge
+```
+
+## Constructor
+
+```python
+LLMJudge(
+    base_url: str,
+    model: str = "gpt-4",
+    api_key: str | None = None,
+    timeout: float = 60.0,
+)
+```
+
+<ParamField path="base_url" type="string" required>
+  Base URL of an OpenAI-compatible API endpoint (e.g. `"http://localhost:9090"`). The evaluator will POST to `{base_url}/v1/chat/completions`.
+</ParamField>
+
+<ParamField path="model" type="string" default="gpt-4">
+  Model name to pass in the judge request (e.g. `"gpt-4"`, `"claude-3-5-sonnet-20241022"`).
+</ParamField>
+
+<ParamField path="api_key" type="string">
+  Bearer token for the judge endpoint. Falls back to the `OPENAI_API_KEY` environment variable if not provided.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="60.0">
+  HTTP request timeout in seconds. If the judge call exceeds this limit, `judge_score: 0.0` is returned.
+</ParamField>
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Uses `"question"` (or falls back to `"context"`) as the question and `"answer"` as the reference answer for the judge prompt.
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the model's output string.
+</ParamField>
+
+### Return values
+
+<ResponseField name="judge_score" type="float" required>
+  The judge's rating normalized from the 1–5 scale to the 0–1 range using the formula `(rating - 1) / 4.0`. A rating of 5 maps to `1.0`; a rating of 1 maps to `0.0`.
+</ResponseField>
+
+<Note>
+  If `response` is empty or the judge call fails for any reason, `judge_score: 0.0` is returned rather than raising an exception, so the benchmark continues running.
+</Note>
+
+## Examples
+
+**CLI** — add `--judge-url` to enable `LLMJudge` for any dataset:
+
+```bash
+context-bench --proxy http://localhost:7878 --dataset alpaca-eval \
+    --judge-url http://localhost:9090 --judge-model gpt-4
+```
+
+**Python API**:
+
+```python
+from context_bench.evaluators import LLMJudge
+judge = LLMJudge(base_url="http://localhost:9090", model="gpt-4")
+judge.score({"question": "What is 2+2?", "answer": "4"}, {"response": "The answer is 4."})
+# {'judge_score': 0.75}  (rating 4/5 → normalized to 0-1)
+```
+
+## When it is used
+
+`LLMJudge` is **not** auto-wired to specific datasets the way other evaluators are. It is activated in two ways:
+
+- **CLI**: Pass `--judge-url <url>` (and optionally `--judge-model <name>`). The judge is added on top of whichever other evaluators are selected.
+- **Python API**: Construct `LLMJudge` explicitly and include it in the `evaluators` list passed to `evaluate()`.
+
+It is the recommended evaluator for `alpaca-eval` and `mt-bench`, where there is no single ground-truth answer.
+
+## Implementation notes
+
+The judge prompt follows the MT-Bench / AlpacaEval format, presenting the question, reference answer, and the model's response, then asking for a single integer rating from 1 to 5:
+
+- **1** — Completely wrong or irrelevant
+- **2** — Partially addresses the question but has major errors
+- **3** — Addresses the question but misses key details
+- **4** — Good response with minor issues
+- **5** — Excellent, fully addresses the question
+
+The judge is called with `temperature=0` and `max_tokens=16` to ensure a deterministic single-integer output. The response is parsed with a regex that extracts the first digit in the range 1–5; if no digit is found, a rating of 1 is assumed.
+
+The HTTP call uses `urllib.request` from the Python standard library — no `httpx` or `requests` dependency is required.

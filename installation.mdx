@@ -1,0 +1,106 @@
+---
+title: "Installation"
+description: "Install context-bench and configure optional extras."
+---
+
+## Requirements
+
+- **Python 3.10 or later**
+- **[uv](https://docs.astral.sh/uv/)** — the recommended package manager
+
+context-bench also works with plain pip. See the pip variants below.
+
+## Install with uv
+
+<CodeGroup>
+
+```bash Core only
+uv sync
+```
+
+```bash With HuggingFace datasets
+uv sync --extra datasets
+```
+
+```bash Everything
+uv sync --all-extras
+```
+
+```bash Development
+uv sync --group dev
+```
+
+</CodeGroup>
+
+<Info>
+  Most of the 42 built-in datasets require the `datasets` extra. If you see an `ImportError` when loading a dataset, run `uv sync --extra datasets`.
+</Info>
+
+## Install with pip
+
+<CodeGroup>
+
+```bash Core only
+pip install context-bench
+```
+
+```bash With HuggingFace datasets
+pip install "context-bench[datasets]"
+```
+
+```bash Everything
+pip install "context-bench[all]"
+```
+
+</CodeGroup>
+
+## Optional extras
+
+| Extra | What it adds | Install |
+|-------|--------------|---------|
+| `datasets` | HuggingFace dataset loaders (`datasets>=2.14`, `huggingface-hub>=0.16`) | `uv sync --extra datasets` |
+| `rich` | Prettier terminal output (`rich>=13.0`) | `uv sync --extra rich` |
+| `mem0` | Mem0 memory system support (`mem0ai>=0.1`) | `uv sync --extra mem0` |
+| `zep` | Zep memory system support (`zep-python>=2.0`) | `uv sync --extra zep` |
+| `dspy` | DSPy optimizer sweep (`dspy>=2.6`, `rank-bm25>=0.2`) | `uv sync --extra dspy` |
+
+## Environment variables
+
+<Warning>
+  Most datasets and the `OpenAIProxy` system need a valid `OPENAI_API_KEY` environment variable (or a compatible API key for your proxy). Set it before running any benchmark.
+</Warning>
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+If your proxy uses a different auth scheme, pass the key explicitly:
+
+```python
+from context_bench import OpenAIProxy
+
+proxy = OpenAIProxy(
+    base_url="http://localhost:8080",
+    model="gpt-4",
+    api_key="sk-...",
+)
+```
+
+## Run the tests
+
+```bash
+uv run pytest
+```
+
+Tests live in `tests/`. The development dependency group includes all extras needed to run the full suite.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Benchmark your first proxy in under 5 minutes
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/proxy-benchmark">
+    Full reference for all CLI flags and subcommands
+  </Card>
+</CardGroup>

@@ -1,0 +1,237 @@
+---
+title: "EvalResult"
+description: "The return type of evaluate(). Holds all per-row scores, per-system summaries, and export methods."
+---
+
+```python
+from context_bench import EvalResult, EvalRow
+```
+
+`EvalResult` is a dataclass returned by [`evaluate()`](/api/evaluate) and [`evaluate_memory()`](/api/evaluate#evaluate_memory). It contains every scored row, aggregated summary statistics, timing data, and the run configuration.
+
+---
+
+## EvalResult
+
+```python
+@dataclass
+class EvalResult:
+    rows: list[EvalRow]
+    summary: dict[str, dict[str, float]]
+    timing: dict[str, float]
+    config: dict[str, Any]
+```
+
+### Fields
+
+<ResponseField name="rows" type="list[EvalRow]" required>
+  All scored rows from the evaluation run. Each row corresponds to one (system, example) pair. For memory evaluations, each row corresponds to one (system, example, query) triplet.
+</ResponseField>
+
+<ResponseField name="summary" type="dict[str, dict[str, float]]" required>
+  Per-system metric summaries. The outer key is the system name; the inner dict maps metric names to their computed values.
+
+  ```python
+  # Structure: {system_name: {metric_name: value}}
+  result.summary["kompact"]["mean_score"]       # e.g. 0.734
+  result.summary["kompact"]["pass_rate"]        # e.g. 0.612
+  result.summary["kompact"]["compression_ratio"] # e.g. 0.45
+  ```
+
+  If no `metrics` were passed to `evaluate()`, this dict contains empty dicts per system.
+</ResponseField>
+
+<ResponseField name="timing" type="dict[str, float]">
+  Wall-clock time in seconds spent processing each system. Key is the system name.
+
+  ```python
+  result.timing["kompact"]  # e.g. 42.3 (seconds)
+  ```
+</ResponseField>
+
+<ResponseField name="config" type="dict[str, Any]">
+  Snapshot of the run configuration for reproducibility:
+
+  - `"systems"` — list of system names
+  - `"evaluators"` — list of evaluator names
+  - `"metrics"` — list of metric names
+  - `"num_examples"` — number of examples evaluated
+  - `"max_workers"` — thread count used (1 for sequential)
+</ResponseField>
+
+### Methods
+
+#### filter()
+
+```python
+def filter(**kwargs: Any) -> EvalResult:
+```
+
+Return a new `EvalResult` containing only the rows where `EvalRow` attribute values match the given keyword arguments. The summary is recomputed to include only the systems present in the filtered rows.
+
+```python
+# Filter to one system
+headroom_result = result.filter(system="headroom")
+
+# Filter to one dataset
+hotpot_result = result.filter(dataset="hotpotqa")
+```
+
+#### to_json()
+
+```python
+def to_json() -> str:
+```
+
+Serialize the full result to a JSON string. Includes all rows, summary, timing, and config.
+
+```python
+json_str = result.to_json()
+with open("results.json", "w") as f:
+    f.write(json_str)
+```
+
+#### to_dataframe()
+
+```python
+def to_dataframe() -> pandas.DataFrame:
+```
+
+Convert all rows to a pandas `DataFrame`. Each row becomes one record. Score keys from `EvalRow.scores` and metadata keys from `EvalRow.metadata` are flattened into top-level columns.
+
+<Warning>
+  `to_dataframe()` requires `pandas` to be installed. Install it with `pip install pandas`.
+</Warning>
+
+```python
+df = result.to_dataframe()
+print(df.columns.tolist())
+# ['system', 'example_id', 'dataset', 'input_tokens', 'output_tokens',
+#  'latency', 'f1', 'exact_match', 'recall', 'contains', ...]
+
+# Filter and aggregate with pandas
+df[df["system"] == "kompact"]["f1"].mean()
+```
+
+---
+
+## EvalRow
+
+`EvalRow` is a flat dataclass. One row is created per (system, example) pair by `evaluate()`, or per (system, example, query) triplet by `evaluate_memory()`.
+
+```python
+@dataclass
+class EvalRow:
+    system: str
+    example_id: str | int
+    scores: dict[str, float]
+    input_tokens: int
+    output_tokens: int
+    metadata: dict[str, Any]
+    latency: float
+    dataset: str
+```
+
+### Fields
+
+<ResponseField name="system" type="str" required>
+  The name of the system that produced this row. Matches the `.name` property of the system object.
+</ResponseField>
+
+<ResponseField name="example_id" type="str | int" required>
+  The identifier of the example, taken from `example["id"]`. Falls back to the integer index within the dataset if the example has no `"id"` key.
+</ResponseField>
+
+<ResponseField name="scores" type="dict[str, float]" required>
+  All scores produced by evaluators for this row. Keys are evaluator-specific score names, e.g. `{"f1": 0.8, "exact_match": 0.0, "recall": 1.0, "contains": 1.0}`.
+</ResponseField>
+
+<ResponseField name="input_tokens" type="int" required>
+  Token count of the input example dict, measured before the system processes it.
+</ResponseField>
+
+<ResponseField name="output_tokens" type="int" required>
+  Token count of the processed dict returned by the system, measured after `.process()` returns.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict[str, Any]">
+  Additional data captured during processing. When the system returns `"api_usage"` in its output dict, the following keys are populated automatically:
+
+  - `prompt_tokens` — reported by the proxy API
+  - `completion_tokens` — reported by the proxy API
+  - `total_tokens` — reported by the proxy API
+
+  For memory evaluations, `metadata` also contains `qa_type`, `ingest_latency`, `query_latency`, `conversation_id`, and `turn_count`.
+</ResponseField>
+
+<ResponseField name="latency" type="float">
+  Wall-clock time in seconds for the system's `.process()` call, measured with `time.monotonic()`. Does not include evaluator scoring time.
+</ResponseField>
+
+<ResponseField name="dataset" type="str">
+  Dataset tag for the example, taken from `example["dataset"]`. Empty string if the example has no `"dataset"` key.
+</ResponseField>
+
+---
+
+## Examples
+
+### Accessing the summary
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PassRate, CompressionRatio
+
+result = evaluate(
+    systems=[OpenAIProxy("http://localhost:7878", name="my-system")],
+    dataset=your_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1"), PassRate(score_field="f1"), CompressionRatio()],
+)
+
+print(result.summary["my-system"]["mean_score"])       # 0.734
+print(result.summary["my-system"]["pass_rate"])        # 0.612
+print(result.summary["my-system"]["compression_ratio"]) # 0.45
+```
+
+### Iterating over rows
+
+```python
+for row in result.rows:
+    print(row.system, row.example_id, row.scores["f1"], row.latency)
+```
+
+### Exporting to JSON
+
+```python
+json_str = result.to_json()
+with open("results.json", "w") as f:
+    f.write(json_str)
+```
+
+### Exporting to a DataFrame
+
+```python
+df = result.to_dataframe()
+
+# Per-system mean F1
+df.groupby("system")["f1"].mean()
+
+# Slowest examples
+df.sort_values("latency", ascending=False).head(10)
+```
+
+### Filtering to one system
+
+```python
+headroom_result = result.filter(system="headroom")
+print(len(headroom_result.rows))           # rows for headroom only
+print(headroom_result.summary["headroom"]) # summary recomputed
+```
+
+### Filtering to one dataset
+
+```python
+hotpot_result = result.filter(dataset="hotpotqa")
+```

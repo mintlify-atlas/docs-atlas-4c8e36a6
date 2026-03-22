@@ -1,0 +1,207 @@
+---
+title: "Metrics"
+description: "Metrics aggregate per-example scores into summary statistics. Seven built-in metrics cover quality, efficiency, latency, and cost."
+---
+
+A metric takes the full list of `EvalRow` objects for a system and returns a `dict[str, float]` of summary statistics. Metrics run after all examples have been processed.
+
+## The Metric protocol
+
+```python
+from typing import Protocol, runtime_checkable
+from context_bench.results import EvalRow
+
+@runtime_checkable
+class Metric(Protocol):
+    """Aggregates per-example scores into summary stats."""
+
+    @property
+    def name(self) -> str: ...
+
+    def compute(self, rows: list[EvalRow]) -> dict[str, float]: ...
+```
+
+`rows` is a flat list of `EvalRow` dataclass instances, one per `(system, example)` pair. Access scores with `row.scores["f1"]`, token counts with `row.input_tokens` / `row.output_tokens`, and timing with `row.latency`.
+
+## The score_field parameter
+
+Several metrics accept a `score_field` parameter that selects which evaluator output to aggregate. For example, `MeanScore(score_field="f1")` averages the `f1` field from `AnswerQuality`, while `MeanScore(score_field="mc_accuracy")` averages the `mc_accuracy` field from `MultipleChoiceAccuracy`.
+
+Common score fields:
+
+| Field | Source evaluator |
+|-------|------------------|
+| `f1` | `AnswerQuality` |
+| `exact_match` | `AnswerQuality` |
+| `recall` | `AnswerQuality` |
+| `contains` | `AnswerQuality` |
+| `rouge_l_f1` | `SummarizationQuality` |
+| `mc_accuracy` | `MultipleChoiceAccuracy` |
+| `pass_at_1` | `CodeExecution` |
+| `math_equiv` | `MathEquivalence` |
+| `nli_accuracy` | `NLILabelMatch` |
+| `ifeval_strict` | `IFEvalChecker` |
+| `judge_score` | `LLMJudge` |
+
+## Built-in metrics
+
+### MeanScore
+
+Average of `score_field` across all examples.
+
+```python
+from context_bench.metrics import MeanScore
+
+MeanScore(score_field="f1")
+# Returns: {"mean_score": 0.742}
+```
+
+---
+
+### PassRate
+
+Fraction of examples where `score_field` exceeds `threshold`.
+
+```python
+from context_bench.metrics import PassRate
+
+PassRate(score_field="f1", threshold=0.7)
+# Returns: {"pass_rate": 0.61}
+```
+
+The default `threshold` is `0.7`. Override with `--threshold` on the CLI.
+
+---
+
+### CompressionRatio
+
+Measures how much the system reduces token count: `1 - (output_tokens / input_tokens)`. Positive values mean compression; negative values mean expansion.
+
+```python
+from context_bench.metrics import CompressionRatio
+
+CompressionRatio()
+# Returns: {"compression_ratio": 0.42}
+```
+
+Token counting uses tiktoken (`cl100k_base`) by default. Swap the tokenizer via `context_bench.utils.tokens`.
+
+---
+
+### CostOfPass
+
+Tokens spent per successful completion — the input tokens consumed for every example that passes the threshold. Lower is better. Based on the methodology from [arXiv:2504.13359](https://arxiv.org/abs/2504.13359).
+
+```python
+from context_bench.metrics import CostOfPass
+
+CostOfPass(score_field="f1", threshold=0.7)
+# Returns: {"cost_of_pass": 2447.0}
+```
+
+Use this alongside `PassRate` to understand the efficiency trade-off: a system that passes more examples cheaply beats one that passes the same number expensively.
+
+---
+
+### Latency
+
+Per-example wall-clock timing. Reports four percentiles.
+
+```python
+from context_bench.metrics import Latency
+
+Latency()
+# Returns: {
+#   "latency_mean": 1.23,
+#   "latency_median": 1.10,
+#   "latency_p95": 2.81,
+#   "latency_p99": 3.44,
+# }
+```
+
+Latency is measured from the start of `System.process()` to the return of the result.
+
+---
+
+### PerDatasetBreakdown
+
+Mean score sliced by dataset tag. Automatically enabled when you load more than one dataset.
+
+```python
+from context_bench.metrics import PerDatasetBreakdown
+
+PerDatasetBreakdown(score_field="f1")
+# Returns: {
+#   "hotpotqa_mean": 0.71,
+#   "gsm8k_mean": 0.88,
+# }
+```
+
+Each `EvalRow` carries a `dataset` field set from `example["dataset"]`. Rows without a dataset tag are grouped together.
+
+---
+
+### ParetoRank
+
+Ranks systems on the quality-vs-cost Pareto frontier. Automatically enabled for multi-system runs.
+
+```python
+from context_bench.metrics import ParetoRank
+
+ParetoRank(score_field="f1")
+# Returns: {"pareto_rank": 1.0}  # 1 = Pareto-dominant
+```
+
+A system is Pareto-dominant if no other system beats it on both quality and token cost simultaneously.
+
+## Using metrics
+
+Pass metrics as a list to `evaluate()`:
+
+```python
+from context_bench import evaluate
+from context_bench.metrics import MeanScore, PassRate, CompressionRatio, Latency
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        PassRate(score_field="f1", threshold=0.7),
+        CompressionRatio(),
+        Latency(),
+    ],
+)
+print(result.summary)
+# {"my-system": {"mean_score": 0.74, "pass_rate": 0.61, "compression_ratio": 0.42, ...}}
+```
+
+## Implementing a custom metric
+
+Any class with `name` and `compute()` satisfies the protocol:
+
+```python
+class MaxScore:
+    name = "max-score"
+
+    def __init__(self, score_field: str = "f1"):
+        self.score_field = score_field
+
+    def compute(self, rows):
+        scores = [r.scores.get(self.score_field, 0.0) for r in rows]
+        return {"max_score": max(scores) if scores else 0.0}
+```
+
+Pass it alongside built-in metrics:
+
+```python
+result = evaluate(
+    ...,
+    metrics=[MeanScore(score_field="f1"), MaxScore(score_field="f1")],
+)
+```
+
+<Note>
+`Metric` is a `typing.Protocol`. You do not need to import or subclass anything from context-bench to define a custom metric.
+</Note>

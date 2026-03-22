@@ -1,0 +1,130 @@
+---
+title: "Comparing multiple systems"
+description: "Run side-by-side benchmarks across multiple proxy systems and datasets, with automatic Pareto frontier analysis."
+---
+
+Running two or more systems in one invocation lets you compare quality, compression, and cost on identical data. context-bench automatically adds Pareto ranking when multiple systems are present and per-dataset breakdowns when multiple datasets are requested.
+
+## Two systems
+
+Pass `--proxy` and `--name` pairs. Names are optional — if omitted, context-bench derives them from the URL hostname.
+
+```bash
+context-bench \
+  --proxy http://localhost:7878 --name kompact \
+  --proxy http://localhost:8787 --name headroom \
+  --dataset hotpotqa -n 50
+```
+
+## Three systems
+
+Add a baseline (e.g. a passthrough proxy or the raw model) alongside your candidates:
+
+```bash
+context-bench \
+  --proxy http://localhost:9091 --name baseline \
+  --proxy http://localhost:7878 --name kompact \
+  --proxy http://localhost:7879 --name headroom \
+  --dataset bfcl --model haiku --score-field contains
+```
+
+Output:
+
+```
+# Evaluation Results
+
+| System   | mean_score | pass_rate | compression_ratio | cost_of_pass |
+|----------|-----------|-----------|-------------------|--------------|
+| Baseline | 0.2930    | 0.2930    | -0.3264           | 4,291        |
+| Kompact  | 0.3640    | 0.3640    | -0.1345           | 2,447        |
+| Headroom | 0.3140    | 0.3140    | -0.1793           | 3,815        |
+
+*1,431 examples evaluated*
+```
+
+## Multiple datasets
+
+Repeat `--dataset` to evaluate across several benchmarks in a single run. A per-dataset breakdown table is added automatically.
+
+```bash
+context-bench \
+  --proxy http://localhost:7878 --name kompact \
+  --proxy http://localhost:8787 --name baseline \
+  --dataset mmlu --dataset arc-challenge --dataset hellaswag \
+  --score-field mc_accuracy -n 100
+```
+
+## Pareto frontier analysis
+
+When two or more systems are compared, context-bench computes a `pareto_rank` for each system. The Pareto frontier is the set of systems that are not dominated on both the quality axis (`mean_score`) and the cost axis (`cost_of_pass`). A rank of 1 means the system is on the frontier.
+
+In the example above, **Kompact** has the highest `mean_score` (0.3640) and the lowest `cost_of_pass` (2,447) — it dominates both other systems and sits alone on the Pareto frontier.
+
+<Note>
+  Pareto ranking is computed after evaluation completes. It requires at least two systems and uses `mean_score` vs `cost_of_pass` by default.
+</Note>
+
+## Python API
+
+Pass a list of systems to `evaluate()`. Filter the result to one system with `.filter()`.
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PassRate, CompressionRatio, CostOfPass
+
+kompact = OpenAIProxy("http://localhost:7878", model="gpt-4", name="kompact")
+headroom = OpenAIProxy("http://localhost:8787", model="gpt-4", name="headroom")
+
+result = evaluate(
+    systems=[kompact, headroom],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        PassRate(score_field="f1"),
+        CompressionRatio(),
+        CostOfPass(score_field="f1"),
+    ],
+)
+
+# Full summary
+print(result.summary)
+
+# Filter to one system
+headroom_rows = result.filter(system="headroom")
+```
+
+## Per-dataset breakdown
+
+When multiple datasets are loaded, `PerDatasetBreakdown` is added automatically by the CLI. In Python, add it explicitly:
+
+```python
+from context_bench.metrics import PerDatasetBreakdown
+
+result = evaluate(
+    systems=[kompact, headroom],
+    dataset=combined_dataset,   # tagged with "dataset" key per example
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        PerDatasetBreakdown(score_field="f1"),
+    ],
+)
+```
+
+## Choosing the right score field
+
+<Tip>
+  Different task types use different score fields. Pass `--score-field` (CLI) or `score_field=` (Python) to select the right one.
+</Tip>
+
+| Task type | Recommended `score_field` | Datasets |
+|-----------|--------------------------|----------|
+| Open-domain QA | `f1` | hotpotqa, triviaqa, musique, narrativeqa |
+| Multiple choice | `mc_accuracy` | mmlu, arc-challenge, hellaswag, winogrande, gpqa |
+| Code generation | `pass_at_1` | humaneval, mbpp |
+| Math | `math_equiv` | math, gsm8k, mgsm |
+| Summarization | `rouge_l_f1` | multi-news, dialogsum, govreport |
+| Instruction following | `ifeval_strict` | ifeval |
+| LLM judge | `judge_score` | alpaca-eval, mt-bench |

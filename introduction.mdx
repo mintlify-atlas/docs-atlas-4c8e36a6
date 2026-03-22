@@ -1,0 +1,87 @@
+---
+title: "Introduction"
+description: "A benchmarking framework for any system that transforms LLM context — compressors, RAG rerankers, memory managers, and more."
+---
+
+context-bench measures how well a system that touches the context window before an LLM sees it actually works, and what it costs. Prompt compressors, memory managers, context stuffers, RAG rerankers — if it transforms context, context-bench benchmarks it.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Benchmark your first proxy in under 5 minutes
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/proxy-benchmark">
+    Full reference for all CLI flags and subcommands
+  </Card>
+  <Card title="Python API" icon="code" href="/api/evaluate">
+    Use the Python API for custom evaluators and metrics
+  </Card>
+  <Card title="42 built-in datasets" icon="database" href="/api/datasets/built-in">
+    QA, reasoning, code, summarization, long context, and more
+  </Card>
+</CardGroup>
+
+## The four-stage pipeline
+
+Every context-bench evaluation follows the same four stages:
+
+```
+Dataset → System → Evaluator → Metric
+```
+
+1. **Dataset** — any `Iterable[dict]` with `"id"` and `"context"` keys. Use one of the 42 built-in loaders or pass your own JSONL file.
+2. **System** — the thing you are benchmarking. Implements `.name` and `.process(example) -> dict`.
+3. **Evaluator** — compares the original example to the processed output. Implements `.name` and `.score(original, processed) -> dict[str, float]`.
+4. **Metric** — aggregates per-example scores into a summary. Implements `.name` and `.compute(rows) -> dict[str, float]`.
+
+<Info>
+  All interfaces are [`typing.Protocol`](https://docs.python.org/3/library/typing.html#typing.Protocol). Implement the required methods on any class — never subclass context-bench internals.
+</Info>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="42 built-in datasets" icon="layer-group">
+    QA, reasoning, code generation, summarization, NLI, instruction following, long context, and agent traces — all ready to use out of the box
+  </Card>
+  <Card title="8 auto-wired evaluators" icon="circle-check">
+    Evaluators are selected automatically based on the datasets you run — no manual wiring needed
+  </Card>
+  <Card title="7 aggregation metrics" icon="chart-bar">
+    Mean score, pass rate, compression ratio, cost-of-pass, latency, per-dataset breakdown, and Pareto ranking
+  </Card>
+  <Card title="Multi-system comparison" icon="scale-balanced">
+    Run multiple systems in a single call and get a Pareto frontier analysis automatically
+  </Card>
+  <Card title="Resumable runs" icon="rotate-right">
+    Cache results to disk and resume interrupted evaluations without repeating completed examples
+  </Card>
+  <Card title="Memory benchmarking" icon="brain">
+    Evaluate stateful memory systems (naive, embedding, Mem0, Zep) on LoCoMo and LongMemEval
+  </Card>
+  <Card title="DSPy optimizer sweep" icon="sliders">
+    Run a factorial sweep of DSPy optimizers across datasets, tracking compile cost and inference scores
+  </Card>
+</CardGroup>
+
+## Python API example
+
+For full control, use the Python API directly:
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PassRate, Latency
+
+kompact = OpenAIProxy("http://localhost:7878", model="claude-sonnet-4-5-20250929", name="kompact")
+result = evaluate(
+    systems=[kompact],
+    dataset=your_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1"), PassRate(score_field="f1"), Latency()],
+    max_workers=4,       # concurrent execution
+    cache_dir=".cache/", # resume on re-run
+)
+print(result.summary)
+```
+
+For a guided walkthrough, continue to the [Quickstart](/quickstart).

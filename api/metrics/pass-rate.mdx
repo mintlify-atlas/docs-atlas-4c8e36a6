@@ -1,0 +1,79 @@
+---
+title: "PassRate"
+description: "Fraction of examples whose score meets or exceeds a threshold."
+---
+
+`PassRate` reports the proportion of evaluated examples that score at or above a
+defined quality threshold. Use it to answer "what percentage of responses were
+good enough?"
+
+```python
+from context_bench.metrics import PassRate
+```
+
+## Constructor parameters
+
+<ParamField path="threshold" type="float" default="0.7">
+  Minimum score required for an example to count as a pass.
+  An example passes when `score >= threshold`.
+</ParamField>
+
+<ParamField path="score_field" type="string" default="score">
+  Name of the score key to evaluate. Must match a key emitted by an evaluator —
+  for example `"f1"`, `"exact_match"`, or `"mc_accuracy"`.
+</ParamField>
+
+## Return value
+
+`compute()` returns a `dict[str, float]` with the following key:
+
+<ResponseField name="pass_rate" type="float">
+  Fraction of examples where `score_field >= threshold`. Range `[0.0, 1.0]`.
+  Returns `0.0` when the row list is empty.
+</ResponseField>
+
+## Usage
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import PassRate
+
+result = evaluate(
+    systems=[my_system],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        PassRate(threshold=0.7, score_field="f1"),
+    ],
+)
+print(result.summary["my-system"]["pass_rate"])  # e.g. 0.61
+```
+
+<CodeGroup>
+
+```python strict threshold
+PassRate(threshold=0.9, score_field="f1")
+```
+
+```python lenient threshold
+PassRate(threshold=0.5, score_field="f1")
+```
+
+```python code execution
+# pass@1: exact pass required
+PassRate(threshold=1.0, score_field="pass_at_1")
+```
+
+</CodeGroup>
+
+## When it is enabled
+
+`PassRate` is included in every CLI run. The `--threshold` flag controls the
+threshold value (default: `0.7`) and `--score-field` controls which field is
+read (default: `f1`).
+
+<Tip>
+  Combine `PassRate` with `CostOfPass` to understand both how often your system
+  succeeds and how many tokens it spends per success.
+</Tip>

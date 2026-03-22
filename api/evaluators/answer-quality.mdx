@@ -1,0 +1,83 @@
+---
+title: 'AnswerQuality'
+description: 'Token-level F1, exact match, recall, and substring check against a ground-truth answer. Auto-wired for every dataset.'
+---
+
+`AnswerQuality` measures how well a model response matches a ground-truth answer using SQuAD-style token overlap metrics. It is the default evaluator and runs on every dataset automatically.
+
+```python
+from context_bench.evaluators import AnswerQuality
+```
+
+## Constructor
+
+`AnswerQuality` takes no constructor parameters.
+
+```python
+ev = AnswerQuality()
+```
+
+## score()
+
+```python
+def score(self, original: dict[str, Any], processed: dict[str, Any]) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Must contain an `"answer"` key with the ground-truth string.
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system under test. Must contain a `"response"` key with the model's output string.
+</ParamField>
+
+### Return values
+
+<ResponseField name="f1" type="float" required>
+  Token-level F1 between the response and the reference answer. Computed as the harmonic mean of token precision and recall after whitespace tokenization and lowercasing.
+</ResponseField>
+
+<ResponseField name="exact_match" type="float" required>
+  `1.0` if the response (after normalization) exactly equals the reference answer, otherwise `0.0`.
+</ResponseField>
+
+<ResponseField name="recall" type="float" required>
+  Token-level recall: fraction of reference tokens that appear in the response.
+</ResponseField>
+
+<ResponseField name="contains" type="float" required>
+  `1.0` if the reference answer string appears as a substring of the response (case-insensitive), otherwise `0.0`.
+</ResponseField>
+
+<Note>
+  If `answer` is empty, all four scores return `1.0`. If `response` is empty, all four return `0.0`.
+</Note>
+
+## Example
+
+```python
+from context_bench.evaluators import AnswerQuality
+ev = AnswerQuality()
+ev.score({"answer": "Paris"}, {"response": "The capital is Paris."})
+# {'f1': 0.5, 'exact_match': 0.0, 'recall': 1.0, 'contains': 1.0}
+```
+
+The response contains the answer (`contains: 1.0`, `recall: 1.0`) but the extra words lower F1 and the strings are not identical (`exact_match: 0.0`).
+
+## Auto-wired datasets
+
+`AnswerQuality` is applied to **all datasets** by default — no configuration required.
+
+## Implementation notes
+
+Scoring is delegated to three utility functions from `context_bench.metrics.quality`:
+
+- **`f1_score(response, reference)`** — tokenizes both strings, computes the number of common tokens, then returns `2 * precision * recall / (precision + recall)`.
+- **`exact_match(response, reference)`** — normalizes both strings (lowercase, strip punctuation, collapse whitespace) and returns `1.0` on equality.
+- **`recall_score(response, reference)`** — returns `common_tokens / len(reference_tokens)`.
+
+All three functions are importable directly:
+
+```python
+from context_bench.metrics.quality import f1_score, exact_match, recall_score
+```

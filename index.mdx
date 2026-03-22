@@ -1,97 +1,98 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "context-bench"
+description: "Benchmark any system that transforms LLM context — prompt compressors, RAG rerankers, memory managers, and more."
 ---
 
-## Setting up
-
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Benchmark your first proxy in under 5 minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="CLI Reference" icon="terminal" href="/cli/proxy-benchmark">
+    Full reference for all CLI flags and subcommands
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Python API" icon="code" href="/api/evaluate">
+    Use the Python API for custom evaluators and metrics
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="42 Built-in Datasets" icon="database" href="/api/datasets/built-in">
+    QA, reasoning, code, summarization, long context, and more
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What is context-bench?
 
-Everything you need to create world-class documentation.
+You built (or bought) something that modifies LLM context. Now you need to answer:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+- **Does compression destroy information?** Measure quality with F1, exact match, and pass rate against ground-truth QA datasets.
+- **Is the cost worth it?** Track compression ratio and cost-per-successful-completion side by side.
+- **Which approach wins?** Run multiple systems on the same dataset in one call and get a comparison table.
 
-## Need inspiration?
+context-bench gives you a single CLI command (or Python `evaluate()` call) that runs your system against a dataset, scores every example, and aggregates the results — no boilerplate, no framework lock-in.
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+```bash
+# Benchmark a proxy in one command
+context-bench --proxy http://localhost:7878 --dataset hotpotqa -n 50
+
+# Compare two proxies head-to-head
+context-bench \
+  --proxy http://localhost:7878 --name kompact \
+  --proxy http://localhost:8787 --name headroom \
+  --dataset hotpotqa -n 50
+```
+
+## How it works
+
+context-bench follows a four-stage pipeline:
+
+```
+Dataset → System → Evaluator → Metric
+```
+
+1. **Dataset** — any `Iterable[dict]` with `"id"` and `"context"` keys (42 built-in, or bring your own JSONL)
+2. **System** — the thing you're benchmarking: implements `.process(example) -> dict`
+3. **Evaluator** — scores before/after: implements `.score(original, processed) -> dict[str, float]`
+4. **Metric** — aggregates scores: implements `.compute(rows) -> dict[str, float]`
+
+All interfaces are `typing.Protocol` — implement the methods, never subclass.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="42 built-in datasets" icon="layer-group">
+    QA, reasoning, code generation, summarization, NLI, instruction following, long context, and agent traces — all ready to use
+  </Card>
+  <Card title="8 auto-wired evaluators" icon="check-circle">
+    Answer quality (F1/EM), math equivalence, code execution, multiple-choice accuracy, NLI, IFEval, and LLM-as-judge
+  </Card>
+  <Card title="7 aggregation metrics" icon="chart-bar">
+    Mean score, pass rate, compression ratio, cost-of-pass, latency, per-dataset breakdown, and Pareto ranking
+  </Card>
+  <Card title="Multi-system comparison" icon="scale-balanced">
+    Run multiple systems in a single call and get a Pareto frontier analysis automatically
+  </Card>
+  <Card title="Resumable runs" icon="rotate-right">
+    Cache results to disk and resume interrupted evaluations without re-running completed examples
+  </Card>
+  <Card title="Memory system benchmarking" icon="brain">
+    Evaluate stateful memory systems (naive, embedding, Mem0, Zep) on LoCoMo and LongMemEval
+  </Card>
+</CardGroup>
+
+## Example output
+
+```
+$ context-bench \
+    --proxy http://localhost:9091 --name Baseline \
+    --proxy http://localhost:7878 --name Kompact \
+    --proxy http://localhost:7879 --name Headroom \
+    --dataset bfcl --model haiku --score-field contains
+
+# Evaluation Results
+
+| System   | mean_score | pass_rate | compression_ratio | cost_of_pass |
+|----------|-----------|-----------|-------------------|--------------|
+| Baseline | 0.2930    | 0.2930    | -0.3264           | 4,291        |
+| Kompact  | 0.3640    | 0.3640    | -0.1345           | 2,447        |
+| Headroom | 0.3140    | 0.3140    | -0.1793           | 3,815        |
+
+*1,431 examples evaluated*
+```

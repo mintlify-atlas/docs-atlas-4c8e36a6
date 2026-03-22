@@ -1,0 +1,143 @@
+---
+title: 'Memory Subcommand'
+description: 'Benchmark stateful memory systems on conversation datasets using the context-bench memory subcommand.'
+---
+
+The `memory` subcommand evaluates stateful memory systems on long-conversation QA datasets. It measures how well each system retains and retrieves information across turns, scoring answers against ground truth with F1, exact match, and per-QA-type breakdowns.
+
+## Usage
+
+```bash
+context-bench memory --system NAME --relay URL [options]
+```
+
+## Flags
+
+<ParamField path="--system" type="string" required>
+  Memory system to evaluate. Repeatable — pass multiple `--system` flags to compare systems in one run. At least one is required.
+
+  Available systems: `naive`, `embedding`, `rlm`, `mem0`, `zep`.
+
+  ```bash
+  context-bench memory --system naive --system mem0 --relay http://localhost:7878
+  ```
+</ParamField>
+
+<ParamField path="--relay" type="string" required>
+  OpenAI-compatible relay URL. All memory systems use this endpoint to call the language model.
+</ParamField>
+
+<ParamField path="--dataset" type="string" default="locomo">
+  Memory dataset to evaluate on. Repeatable. Accepts `locomo` or `longmemeval`.
+
+  When omitted, defaults to `locomo`. Pass both to merge the datasets:
+
+  ```bash
+  context-bench memory --system naive --relay http://localhost:7878 \
+    --dataset locomo --dataset longmemeval
+  ```
+</ParamField>
+
+<ParamField path="--model" type="string" default="claude-haiku-4-5-20251001">
+  Model name used for answering questions and running the `MemoryJudge` evaluator.
+</ParamField>
+
+<ParamField path="--api-key" type="string">
+  Bearer token for the relay. When omitted, falls back to the `OPENAI_API_KEY` environment variable.
+</ParamField>
+
+<ParamField path="-n" type="integer" default="all">
+  Maximum number of conversations to evaluate. Useful for quick runs.
+</ParamField>
+
+<ParamField path="--qa-types" type="string">
+  Comma-separated list of QA types to filter. When omitted, all QA types are included.
+
+  Example types: `temporal`, `multi_hop`, `single_hop`, `adversarial`.
+
+  ```bash
+  --qa-types temporal,multi_hop
+  ```
+</ParamField>
+
+<ParamField path="--output" type="string" default="table">
+  Output format. One of `table`, `json`, or `html`.
+</ParamField>
+
+<ParamField path="--score-field" type="string" default="f1">
+  Score field to report as the primary metric. Also controls which field is used in the per-QA-type breakdown table.
+</ParamField>
+
+<ParamField path="--seed" type="integer" default="42">
+  Random seed for dataset splits. Set this to reproduce results across runs.
+</ParamField>
+
+## Memory systems
+
+| System | Description | Extra dependency |
+|--------|-------------|------------------|
+| `naive` | Concatenates all conversation turns into the context window | None |
+| `embedding` | Embeds turns and retrieves the top-k most relevant at query time | None |
+| `rlm` | Retrieval-augmented language model using LanceDB and sentence-transformers | `pip install dspy lancedb duckdb sentence-transformers` |
+| `mem0` | Integrates the mem0ai memory layer | `pip install context-bench[mem0]` |
+| `zep` | Integrates Zep's graphiti-core knowledge graph memory | `pip install context-bench[zep]` |
+
+<Warning>
+  The `mem0` and `zep` systems require optional dependencies. Install them before use or the CLI will exit with an installation hint.
+
+  ```bash
+  pip install context-bench[mem0]
+  pip install context-bench[zep]
+  ```
+</Warning>
+
+## Available datasets
+
+| Name | Description |
+|------|-------------|
+| `locomo` | [LoCoMo](https://huggingface.co/datasets/snap-research/LoCoMo) — long-conversation QA with temporal and multi-hop questions |
+| `longmemeval` | [LongMemEval](https://huggingface.co/datasets/snap-research/LongMemEval) — long-form memory evaluation benchmark |
+
+## Examples
+
+<CodeGroup>
+
+```bash Evaluate a single system
+context-bench memory --system naive --relay http://localhost:7878
+```
+
+```bash Compare two systems on 20 conversations
+context-bench memory \
+  --system naive --system mem0 \
+  --relay http://localhost:7878 \
+  --dataset locomo \
+  -n 20
+```
+
+```bash Filter to specific QA types
+context-bench memory \
+  --system embedding \
+  --relay http://localhost:7878 \
+  --qa-types temporal,multi_hop
+```
+
+```bash JSON output for downstream processing
+context-bench memory \
+  --system naive --system embedding \
+  --relay http://localhost:7878 \
+  --output json
+```
+
+```bash Run on both datasets with a fixed seed
+context-bench memory \
+  --system naive \
+  --relay http://localhost:7878 \
+  --dataset locomo --dataset longmemeval \
+  --seed 123
+```
+
+</CodeGroup>
+
+<Note>
+  The `memory` subcommand automatically adds a `MemoryJudge` evaluator alongside `AnswerQuality`, and computes per-QA-type score breakdowns in the output table.
+</Note>

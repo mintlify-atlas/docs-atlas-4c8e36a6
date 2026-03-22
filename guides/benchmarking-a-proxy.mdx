@@ -1,0 +1,169 @@
+---
+title: "Benchmarking a proxy"
+description: "Measure quality, compression, and cost for any OpenAI-compatible proxy endpoint."
+---
+
+Any proxy that speaks the OpenAI chat completions API can be benchmarked with a single command. This guide walks through starting a proxy, running an evaluation, reading the results, and exporting the data.
+
+## Start your proxy
+
+<Steps>
+  <Step title="Start the proxy">
+    Start the proxy server and note the port it listens on.
+
+    <CodeGroup>
+
+    ```bash Kompact
+    uv run kompact proxy --port 7878
+    ```
+
+    ```bash Headroom
+    pip install "headroom-ai[proxy]"
+    headroom proxy --port 8787
+    ```
+
+    </CodeGroup>
+
+    Wait until the proxy logs that it is ready before proceeding.
+  </Step>
+
+  <Step title="Run context-bench">
+    Point `--proxy` at the running server and choose a dataset with `--dataset`.
+
+    <CodeGroup>
+
+    ```bash Kompact
+    context-bench --proxy http://localhost:7878 --dataset hotpotqa -n 50
+    ```
+
+    ```bash Headroom
+    context-bench --proxy http://localhost:8787 --dataset hotpotqa -n 50
+    ```
+
+    </CodeGroup>
+
+    The `-n 50` flag limits the run to 50 examples — useful for a quick sanity check before committing to the full dataset.
+  </Step>
+
+  <Step title="Read the output table">
+    When the run finishes, context-bench prints a summary table:
+
+    ```
+    | System   | mean_score | pass_rate | compression_ratio | cost_of_pass |
+    |----------|-----------|-----------|-------------------|--------------|
+    | Kompact  | 0.3640    | 0.3640    | -0.1345           | 2,447        |
+    ```
+
+    | Column | What it measures |
+    |--------|------------------|
+    | `mean_score` | Average score across all examples (default: F1, configurable with `--score-field`) |
+    | `pass_rate` | Fraction of examples scoring above the threshold (default: 0.7, set with `--threshold`) |
+    | `compression_ratio` | `1 - (output_tokens / input_tokens)`. Positive = the proxy reduced context size. |
+    | `cost_of_pass` | Total tokens spent per successful completion. Lower is better. |
+  </Step>
+</Steps>
+
+## Python API
+
+For full control over evaluators, metrics, and export, use `OpenAIProxy` and `evaluate()` directly.
+
+```python
+from context_bench import OpenAIProxy, evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PassRate, Latency
+
+kompact = OpenAIProxy(
+    base_url="http://localhost:7878",
+    model="claude-sonnet-4-5-20250929",
+    name="kompact",
+)
+
+result = evaluate(
+    systems=[kompact],
+    dataset=your_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1"), PassRate(score_field="f1"), Latency()],
+    max_workers=4,
+    cache_dir=".cache/",
+)
+print(result.summary)
+```
+
+### OpenAIProxy constructor options
+
+```python
+OpenAIProxy(
+    base_url="http://localhost:8080",
+    model="gpt-4",
+    api_key="sk-...",              # or set OPENAI_API_KEY env var
+    system_prompt="Be concise.",   # prepended as a system message
+    extra_body={"temperature": 0}, # merged into every request body
+    name="my-proxy",               # display name in results
+    timeout=30.0,                  # HTTP request timeout in seconds
+    max_retries=3,                 # retries on 429 / 5xx
+)
+```
+
+### Export results
+
+```python
+result.to_json()                    # JSON string
+result.to_dataframe()               # pandas DataFrame (requires pandas)
+result.filter(system="kompact")     # filter to one system's rows
+```
+
+## Caching and resumable runs
+
+Pass `--cache-dir` (or `cache_dir=` in Python) to write completed rows to disk. On a subsequent run with the same arguments, already-completed rows are loaded from cache and skipped — the run picks up exactly where it left off.
+
+```bash
+# First run — interrupted after 500 examples
+context-bench --proxy http://localhost:7878 --dataset mmlu \
+  --cache-dir .cache/ -n 1000
+
+# Re-run — picks up from example 501
+context-bench --proxy http://localhost:7878 --dataset mmlu \
+  --cache-dir .cache/ -n 1000
+```
+
+<Note>
+  The cache key is derived from the system name, dataset name, example ID, and evaluator list. Changing any of these will cause a cache miss for affected rows.
+</Note>
+
+## Cookbook
+
+<AccordionGroup>
+  <Accordion title="Smoke test (10 examples)">
+    Run a quick sanity check before committing to a full evaluation:
+
+    ```bash
+    context-bench --proxy http://localhost:7878 --dataset hotpotqa -n 10
+    ```
+  </Accordion>
+
+  <Accordion title="Full evaluation with LLM judge">
+    Add `--judge-url` to score responses with an external LLM on a 1–5 scale (normalized to 0–1 as `judge_score`):
+
+    ```bash
+    context-bench \
+      --proxy http://localhost:7878 --name my-system \
+      --dataset hotpotqa --dataset mmlu --dataset gsm8k \
+      --judge-url http://localhost:9090 \
+      --cache-dir .bench-cache/ \
+      --max-workers 8 \
+      --output html -n 200 > report.html
+    ```
+  </Accordion>
+
+  <Accordion title="Resume an interrupted run">
+    ```bash
+    # Start with cache enabled
+    context-bench --proxy http://localhost:7878 --dataset mmlu \
+      --cache-dir .cache/ -n 1000
+
+    # Re-run after interruption — continues from where it stopped
+    context-bench --proxy http://localhost:7878 --dataset mmlu \
+      --cache-dir .cache/ -n 1000
+    ```
+  </Accordion>
+</AccordionGroup>

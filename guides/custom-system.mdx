@@ -1,0 +1,165 @@
+---
+title: "Building a custom system"
+description: "Implement the System protocol to benchmark any context-transformation logic, from simple truncation to third-party SDKs."
+---
+
+If your system uses a Python SDK instead of an OpenAI-compatible proxy, wrap it in a class that implements the `System` protocol. You don't subclass anything — just implement two things: a `name` property and a `process()` method.
+
+## The System protocol
+
+```python
+from typing import Any, Protocol
+
+class System(Protocol):
+    """Anything that transforms context."""
+
+    @property
+    def name(self) -> str: ...
+
+    def process(self, example: dict[str, Any]) -> dict[str, Any]: ...
+```
+
+`process()` receives an example dict and must return a dict with:
+
+- All original keys preserved (use `{**example, ...}` to keep them)
+- A `"response"` key containing the LLM's output string
+- Optionally a modified `"context"` key if your system compresses or rewrites the context
+
+## Simple example: string truncator
+
+A truncator that trims context to `max_chars` characters before sending it to an LLM:
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore
+
+class TruncateSystem:
+    name = "truncate-4000"
+
+    def __init__(self, max_chars: int = 4000):
+        self.max_chars = max_chars
+
+    def process(self, example: dict) -> dict:
+        truncated = example["context"][: self.max_chars]
+        response = call_your_llm(truncated, example.get("question", ""))
+        return {**example, "context": truncated, "response": response}
+
+
+result = evaluate(
+    systems=[TruncateSystem()],
+    dataset=my_dataset,
+    evaluators=[AnswerQuality()],
+    metrics=[MeanScore(score_field="f1")],
+)
+print(result.summary)
+```
+
+<Tip>
+  Use `{**example, "context": modified, "response": output}` to preserve all original keys. Evaluators like `AnswerQuality` look for `"answer"` in the original example and `"response"` in the processed output.
+</Tip>
+
+## Wrapping a third-party SDK
+
+Some systems (like [Compresr](https://compresr.ai/)) expose a Python SDK instead of a proxy. Wrap them in the same pattern:
+
+```python
+from compresr import CompressionClient
+
+class CompresrSystem:
+    name = "compresr"
+
+    def __init__(self, api_key: str):
+        self.client = CompressionClient(api_key=api_key)
+
+    def process(self, example: dict) -> dict:
+        compressed = self.client.generate(
+            context=example["context"],
+            question=example.get("question", ""),
+        )
+        return {**example, "context": compressed}
+```
+
+<Note>
+  This example modifies `"context"` but does not add a `"response"` key. That's valid if you want to measure compression quality separately — the runner will still score whatever keys your evaluators look at.
+</Note>
+
+## Full evaluate() call
+
+Pass your custom system alongside any evaluators and metrics:
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality, MathEquivalence
+from context_bench.metrics import MeanScore, Latency, PerDatasetBreakdown
+
+class MyCompressor:
+    name = "my-compressor"
+
+    def process(self, example: dict) -> dict:
+        compressed = my_compress(example["context"])
+        return {**example, "context": compressed, "response": compressed}
+
+
+result = evaluate(
+    systems=[MyCompressor()],
+    dataset=my_data,
+    evaluators=[AnswerQuality(), MathEquivalence()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        Latency(),
+        PerDatasetBreakdown(score_field="f1"),
+    ],
+    max_workers=4,
+    cache_dir=".cache/",
+)
+
+print(result.to_json())
+df = result.to_dataframe()  # requires pandas
+```
+
+## Multi-turn systems
+
+For multi-turn datasets like MT-Bench, implement an optional `process_conversation()` method. The runner calls it automatically when the example has a `"turns"` list.
+
+```python
+class MyMultiTurnSystem:
+    name = "my-chatbot"
+
+    def process(self, example: dict) -> dict:
+        """Called for single-turn examples."""
+        return {**example, "response": call_my_api(example["context"])}
+
+    def process_conversation(self, turns: list[dict]) -> list[dict]:
+        """Called for multi-turn examples (e.g., MT-Bench).
+
+        Args:
+            turns: List of user-turn dicts {"role": "user", "content": ...}.
+
+        Returns:
+            List of assistant-response dicts {"role": "assistant", "content": ...},
+            one per user turn.
+        """
+        history = []
+        responses = []
+        for turn in turns:
+            history.append(turn)
+            reply = call_my_api_with_history(history)
+            history.append({"role": "assistant", "content": reply})
+            responses.append({"role": "assistant", "content": reply})
+        return responses
+```
+
+Run MT-Bench with an LLM judge to score the conversation quality:
+
+```bash
+context-bench \
+  --proxy http://localhost:7878 \
+  --dataset mt-bench \
+  --judge-url http://localhost:9090 \
+  --score-field judge_score
+```
+
+<Tip>
+  If `process_conversation()` is not defined, the runner falls back to calling `process()` with the full turns list embedded in the example dict.
+</Tip>

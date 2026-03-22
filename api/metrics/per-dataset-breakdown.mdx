@@ -1,0 +1,86 @@
+---
+title: "PerDatasetBreakdown"
+description: "Mean score broken down by dataset when running multi-dataset evaluations."
+---
+
+`PerDatasetBreakdown` slices the per-example scores by the `dataset` tag on each
+`EvalRow` and reports mean score per dataset. This is useful when you combine
+multiple datasets in a single run and want to see how a system performs on each
+one independently.
+
+```python
+from context_bench.metrics import PerDatasetBreakdown
+```
+
+## Constructor parameters
+
+<ParamField path="score_field" type="string" default="f1">
+  Name of the score key to average within each dataset bucket. Must match a
+  key emitted by an evaluator — for example `"f1"`, `"mc_accuracy"`, or
+  `"math_equiv"`.
+</ParamField>
+
+## Return value
+
+`compute()` returns a `dict[str, float]` where each key has the form
+`"dataset:<name>"`. The value is the mean of `score_field` for all examples
+tagged with that dataset name.
+
+<ResponseField name="dataset:<name>" type="float">
+  Mean score for examples belonging to dataset `<name>`. Keys are sorted
+  alphabetically. Examples without a dataset tag appear under
+  `"dataset:unknown"`.
+</ResponseField>
+
+For example, a run over `hotpotqa` and `gsm8k` produces:
+
+```json
+{
+  "dataset:gsm8k": 0.81,
+  "dataset:hotpotqa": 0.64
+}
+```
+
+## Usage
+
+```python
+from context_bench import evaluate
+from context_bench.evaluators import AnswerQuality
+from context_bench.metrics import MeanScore, PerDatasetBreakdown
+
+result = evaluate(
+    systems=[my_system],
+    dataset=hotpotqa_examples + gsm8k_examples,
+    evaluators=[AnswerQuality()],
+    metrics=[
+        MeanScore(score_field="f1"),
+        PerDatasetBreakdown(score_field="f1"),
+    ],
+)
+for key, score in result.summary["my-system"].items():
+    if key.startswith("dataset:"):
+        print(key, score)
+# dataset:gsm8k    0.81
+# dataset:hotpotqa 0.64
+```
+
+## When it is enabled
+
+The CLI automatically adds `PerDatasetBreakdown` when two or more `--dataset`
+flags are provided.
+
+```bash
+# PerDatasetBreakdown is auto-added here
+context-bench \
+  --proxy http://localhost:7878 \
+  --dataset hotpotqa --dataset gsm8k \
+  --score-field f1
+```
+
+When using the Python API, add it to the `metrics` list manually.
+
+<Note>
+  Each example must carry a `"dataset"` key for the breakdown to be meaningful.
+  The CLI tags examples automatically. If you load data manually, set
+  `example["dataset"] = "my-dataset"` before passing to `evaluate()`.
+</Note>

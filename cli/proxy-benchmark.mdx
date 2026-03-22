@@ -1,0 +1,183 @@
+---
+title: 'Proxy Benchmark'
+description: 'Benchmark OpenAI-compatible proxy endpoints across datasets with quality metrics, compression ratios, and cost analysis.'
+---
+
+The proxy benchmark is the default mode of `context-bench`. It runs one or more OpenAI-compatible proxies against one or more datasets and reports quality, compression, cost, and latency metrics in a comparison table.
+
+## Usage
+
+```bash
+context-bench --proxy URL --dataset NAME [options]
+```
+
+## Flags
+
+<ParamField path="--proxy" type="string" required>
+  OpenAI-compatible proxy URL to benchmark. Repeatable — pass multiple `--proxy` flags to compare systems side by side.
+
+  ```bash
+  context-bench --proxy http://localhost:7878 --dataset hotpotqa
+  ```
+</ParamField>
+
+<ParamField path="--name" type="string">
+  Display name for the corresponding `--proxy` in the results table. Repeatable, paired positionally with each `--proxy`. When omitted, the hostname is extracted from the URL automatically.
+
+  ```bash
+  context-bench --proxy http://localhost:7878 --name kompact --dataset hotpotqa
+  ```
+</ParamField>
+
+<ParamField path="--dataset" type="string" required>
+  Dataset to benchmark against. Repeatable — pass multiple `--dataset` flags to run across several datasets in one command. Accepts a known dataset name or a path to a local `.jsonl` file.
+
+  See [built-in datasets](#built-in-dataset-names) for the full list of names.
+</ParamField>
+
+<ParamField path="--model" type="string" default="claude-haiku-4-5-20251001">
+  Model name passed through to the proxy in every request.
+</ParamField>
+
+<ParamField path="-n / --max-examples" type="integer" default="all">
+  Maximum number of examples to evaluate per dataset. Useful for quick smoke tests.
+</ParamField>
+
+<ParamField path="--output" type="string" default="table">
+  Output format. One of `table`, `json`, or `html`.
+
+  - `table` — markdown table printed to stdout
+  - `json` — JSON object with full per-example results
+  - `html` — self-contained HTML report (redirect to a file with `> report.html`)
+</ParamField>
+
+<ParamField path="--score-field" type="string" default="f1">
+  Score field from `AnswerQuality` to use as the primary metric for `MeanScore`, `PassRate`, and `CostOfPass`. Common values: `f1`, `exact_match`, `recall`, `contains`, `mc_accuracy`, `pass_at_1`, `math_equiv`.
+</ParamField>
+
+<ParamField path="--threshold" type="number" default="0.7">
+  Score threshold for `PassRate` and `CostOfPass`. An example is considered a "pass" when its score meets or exceeds this value.
+</ParamField>
+
+<ParamField path="--judge-url" type="string">
+  OpenAI-compatible URL for LLM-as-judge evaluation. When provided, a `LLMJudge` evaluator is added that rates responses 1–5 (normalized to 0–1 as `judge_score`). Recommended for open-ended generation tasks such as `alpaca-eval` and `mt-bench`.
+</ParamField>
+
+<ParamField path="--judge-model" type="string" default="claude-haiku-4-5-20251001">
+  Model name for the LLM judge when `--judge-url` is set.
+</ParamField>
+
+<ParamField path="--max-workers" type="integer" default="sequential">
+  Number of concurrent threads used to call the proxy. When omitted, examples are evaluated one at a time. Increase this value for faster runs when your proxy supports concurrent requests.
+</ParamField>
+
+<ParamField path="--cache-dir" type="string">
+  Directory for result caching. When set, completed rows are written to disk after each example so an interrupted run can resume without re-evaluating completed examples.
+
+  ```bash
+  # First run — interrupted after 500 examples
+  context-bench --proxy http://localhost:7878 --dataset mmlu --cache-dir .cache/ -n 1000
+
+  # Re-run — picks up where it left off
+  context-bench --proxy http://localhost:7878 --dataset mmlu --cache-dir .cache/ -n 1000
+  ```
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash Single proxy, quick smoke test
+context-bench --proxy http://localhost:7878 --dataset hotpotqa -n 50
+```
+
+```bash Two proxies compared head-to-head
+context-bench \
+  --proxy http://localhost:7878 --name kompact \
+  --proxy http://localhost:8787 --name headroom \
+  --dataset hotpotqa -n 50
+```
+
+```bash Multiple datasets with custom model and JSON output
+context-bench \
+  --proxy http://localhost:7878 \
+  --dataset hotpotqa --dataset gsm8k \
+  --model claude-sonnet-4-5-20250929 \
+  --output json -n 100
+```
+
+```bash Local JSONL file
+context-bench --proxy http://localhost:7878 --dataset ./my_data.jsonl
+```
+
+```bash Full evaluation with LLM judge, caching, and HTML report
+context-bench \
+  --proxy http://localhost:7878 --name my-system \
+  --dataset hotpotqa --dataset mmlu --dataset gsm8k \
+  --judge-url http://localhost:9090 \
+  --cache-dir .bench-cache/ \
+  --max-workers 8 \
+  --output html -n 200 > report.html
+```
+
+```bash Multiple-choice benchmarks with mc_accuracy score field
+context-bench \
+  --proxy http://localhost:7878 --name kompact \
+  --proxy http://localhost:8787 --name baseline \
+  --dataset mmlu --dataset arc-challenge --dataset hellaswag \
+  --score-field mc_accuracy -n 100
+```
+
+```bash Three-proxy comparison on function-calling dataset
+context-bench \
+  --proxy http://localhost:9091 --name Baseline \
+  --proxy http://localhost:7878 --name Kompact \
+  --proxy http://localhost:7879 --name Headroom \
+  --dataset bfcl --model haiku --score-field contains
+```
+
+</CodeGroup>
+
+## Example output
+
+```
+# Evaluation Results
+
+| System   | mean_score | pass_rate | compression_ratio | cost_of_pass |
+|----------|-----------|-----------|-------------------|--------------|
+| Baseline | 0.2930    | 0.2930    | -0.3264           | 4,291        |
+| Kompact  | 0.3640    | 0.3640    | -0.1345           | 2,447        |
+| Headroom | 0.3140    | 0.3140    | -0.1793           | 3,815        |
+
+*1,431 examples evaluated*
+```
+
+When multiple systems are benchmarked, a Pareto rank is added to the summary comparing quality versus cost.
+
+When multiple datasets are passed, a per-dataset breakdown is appended automatically.
+
+## Built-in dataset names
+
+Pass any of these names to `--dataset`. Datasets are loaded from HuggingFace and require `pip install -e ".[datasets]"` (or `uv sync --extra datasets`).
+
+### Multi-config datasets
+
+Some datasets accept a `:config` suffix to select a subset:
+
+```bash
+--dataset mmlu:anatomy
+--dataset mgsm:de
+--dataset mgsm:ja
+--dataset longbench:qasper
+--dataset bbh:causal_judgement
+```
+
+Configurable datasets: `longbench`, `infinitebench`, `bbh`, `mmlu`, `mgsm`.
+
+<Note>
+  Local `.jsonl` files are also accepted. Each record must have `"id"` and `"context"` keys.
+
+  ```bash
+  context-bench --proxy http://localhost:7878 --dataset ./my_data.jsonl
+  ```
+</Note>

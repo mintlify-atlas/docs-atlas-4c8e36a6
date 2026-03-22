@@ -1,0 +1,159 @@
+---
+title: 'DSPy Subcommand'
+description: 'Benchmark DSPy optimizers across datasets with the context-bench dspy subcommand.'
+---
+
+The `dspy` subcommand runs a factorial sweep of DSPy optimizers across context-bench datasets. It tracks compile cost, inference scores, and task features, producing data useful for optimizer selection meta-learning.
+
+## Usage
+
+```bash
+context-bench dspy --optimizer NAME --dataset NAME [options]
+```
+
+## Flags
+
+<ParamField path="--optimizer" type="string" default="all">
+  DSPy optimizer to benchmark. Repeatable — omit to run all optimizers.
+
+  Available optimizers:
+  - `LabeledFewShot`
+  - `BootstrapFewShot`
+  - `BootstrapFewShotWithRandomSearch`
+  - `COPRO`
+  - `MIPROv2`
+  - `SIMBA`
+  - `GEPA`
+
+  ```bash
+  context-bench dspy --optimizer MIPROv2 --optimizer SIMBA --dataset gsm8k
+  ```
+</ParamField>
+
+<ParamField path="--dataset" type="string" default="all compatible">
+  Dataset to benchmark on. Repeatable. When omitted, all datasets compatible with the selected optimizers are used.
+</ParamField>
+
+<ParamField path="--budget" type="string" default="light">
+  Optimization budget tier. Repeatable — pass multiple tiers to sweep across them. One of `light`, `medium`, or `heavy`.
+
+  Higher budget tiers allow optimizers more compilation iterations and candidates.
+</ParamField>
+
+<ParamField path="--seed" type="integer" default="[42]">
+  Random seed for the optimizer. Repeatable — pass multiple seeds to evaluate variance across runs.
+
+  ```bash
+  --seed 42 --seed 123 --seed 456
+  ```
+</ParamField>
+
+<ParamField path="--model" type="string" default="claude-haiku-4-5-20251001">
+  Language model used for DSPy inference during both compilation and evaluation.
+</ParamField>
+
+<ParamField path="--prompt-model" type="string">
+  Separate model for instruction generation. Applies to optimizers that generate prompt instructions during compilation: `MIPROv2`, `COPRO`, and `SIMBA`. When omitted, `--model` is used for all steps.
+</ParamField>
+
+<ParamField path="--cache-dir" type="string" default=".dspy_cache">
+  Directory for compiled program cache. Compiled programs are stored here and reused on subsequent runs to avoid recompilation.
+</ParamField>
+
+<ParamField path="--max-train" type="integer" default="500">
+  Maximum training examples per dataset used during compilation.
+</ParamField>
+
+<ParamField path="--max-val" type="integer" default="200">
+  Maximum validation examples per dataset used during compilation.
+</ParamField>
+
+<ParamField path="-n / --max-examples" type="integer" default="all">
+  Maximum test examples per dataset used during evaluation. Useful for quick runs.
+</ParamField>
+
+<ParamField path="--cost-cap" type="number">
+  Abort the sweep if the estimated cost exceeds this amount in dollars. Prevents runaway spend on large sweeps.
+</ParamField>
+
+<ParamField path="--compile-only" type="boolean" default="false">
+  Compile optimizers but skip the evaluation step. Use this to pre-populate the cache before a full evaluation run.
+</ParamField>
+
+<ParamField path="--include-ablations" type="boolean" default="false">
+  Include GEPA ablation runs that omit the feedback metric. Adds extra rows to the results for analysis.
+</ParamField>
+
+<ParamField path="--output" type="string" default="table">
+  Output format. One of `table` or `json`.
+
+  <Note>
+    HTML output is not available for the `dspy` subcommand. Use `table` or `json`.
+  </Note>
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash Single optimizer, single dataset, light budget
+context-bench dspy --optimizer MIPROv2 --dataset hotpotqa --budget light
+```
+
+```bash Two optimizers, two datasets, medium budget, two seeds
+context-bench dspy \
+  --optimizer GEPA --optimizer SIMBA \
+  --dataset gsm8k --dataset mmlu \
+  --budget medium \
+  --seed 42 --seed 123 \
+  --model claude-haiku-4-5-20251001
+```
+
+```bash Full sweep across all optimizers and datasets
+context-bench dspy --budget light
+```
+
+```bash Compile only — populate cache without evaluation
+context-bench dspy \
+  --optimizer MIPROv2 \
+  --dataset hotpotqa \
+  --compile-only \
+  --cache-dir .dspy_cache/
+```
+
+```bash Budget sweep with cost cap and JSON output
+context-bench dspy \
+  --optimizer BootstrapFewShot --optimizer MIPROv2 \
+  --dataset gsm8k \
+  --budget light --budget medium --budget heavy \
+  --cost-cap 5.00 \
+  --output json
+```
+
+```bash Separate prompt model for instruction generation
+context-bench dspy \
+  --optimizer COPRO --optimizer MIPROv2 \
+  --dataset hotpotqa \
+  --model claude-haiku-4-5-20251001 \
+  --prompt-model claude-sonnet-4-5-20250929
+```
+
+</CodeGroup>
+
+## How the sweep works
+
+The sweep runs every combination of the selected optimizers, datasets, budgets, and seeds. For each combination:
+
+1. The optimizer compiles a DSPy program using the training split.
+2. The compiled program is evaluated on the test split.
+3. Results are written to `--output` with compile metadata and inference scores.
+
+Completed, failed, and skipped runs are reported in the final summary line:
+
+```
+Sweep complete: 12 completed, 0 failed, 0 skipped
+```
+
+<Tip>
+  Use `--compile-only` on a first pass to warm the cache, then run the full evaluation separately. This is useful when compilation is expensive and you want to reuse compiled programs across multiple evaluation configurations.
+</Tip>
