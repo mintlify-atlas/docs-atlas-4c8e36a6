@@ -1,0 +1,141 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "context-bench",
+  "projectDescription": "A benchmarking framework for any system that transforms LLM context — prompt compressors, RAG rerankers, memory managers, and more.",
+  "theme": "palm",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/proxy-benchmark",
+              "cli/memory",
+              "cli/dspy"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/systems",
+              "concepts/evaluators",
+              "concepts/metrics",
+              "concepts/datasets"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/benchmarking-a-proxy",
+              "guides/custom-system",
+              "guides/memory-evaluation",
+              "guides/multi-system-comparison",
+              "guides/autoresearch-loop"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Python API",
+            "pages": [
+              "api/evaluate",
+              "api/openai-proxy",
+              "api/eval-result"
+            ]
+          },
+          {
+            "group": "Evaluators",
+            "pages": [
+              "api/evaluators/answer-quality",
+              "api/evaluators/summarization-quality",
+              "api/evaluators/multiple-choice",
+              "api/evaluators/code-execution",
+              "api/evaluators/math-equivalence",
+              "api/evaluators/nli-label-match",
+              "api/evaluators/ifeval-checker",
+              "api/evaluators/llm-judge"
+            ]
+          },
+          {
+            "group": "Metrics",
+            "pages": [
+              "api/metrics/mean-score",
+              "api/metrics/pass-rate",
+              "api/metrics/compression-ratio",
+              "api/metrics/cost-of-pass",
+              "api/metrics/latency",
+              "api/metrics/per-dataset-breakdown",
+              "api/metrics/pareto-rank"
+            ]
+          },
+          {
+            "group": "Datasets",
+            "pages": [
+              "api/datasets/built-in",
+              "api/datasets/custom"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "42 built-in datasets spanning QA, reasoning, code, summarization, NLI, instruction following, long context, and agent traces",
+    "8 auto-wired evaluators including answer quality (F1/EM), math equivalence, code execution, and LLM-as-judge",
+    "7 aggregation metrics including compression ratio, cost-of-pass, latency, and Pareto ranking",
+    "Side-by-side multi-system comparison with Pareto frontier analysis",
+    "Resumable runs via JSONL result caching",
+    "Concurrent evaluation with configurable thread pool",
+    "Memory system benchmarking (naive, embedding, RLM, Mem0, Zep) on LoCoMo and LongMemEval",
+    "DSPy optimizer sweep benchmarking across multiple datasets and budget tiers",
+    "Protocol-based extension: implement .process(), .score(), or .compute() — no subclassing required",
+    "Multiple output formats: table, JSON, HTML"
+  ],
+  "publicApiSurface": [
+    "evaluate(systems, dataset, evaluators, metrics, max_workers, cache_dir)",
+    "evaluate_memory(systems, dataset, evaluators, metrics, max_examples, progress)",
+    "OpenAIProxy(base_url, model, name, api_key, system_prompt, extra_body)",
+    "ClaudeCLI",
+    "EvalResult.summary / .to_json() / .to_dataframe() / .filter()",
+    "EvalRow",
+    "MemorySystem protocol (reset, ingest, query)",
+    "System protocol (.name, .process)",
+    "Evaluator protocol (.name, .score)",
+    "Metric protocol (.name, .compute)",
+    "AnswerQuality()",
+    "SummarizationQuality()",
+    "MultipleChoiceAccuracy()",
+    "CodeExecution(timeout)",
+    "MathEquivalence()",
+    "NLILabelMatch()",
+    "IFEvalChecker()",
+    "LLMJudge(base_url, model)",
+    "MeanScore(score_field)",
+    "PassRate(threshold, score_field)",
+    "CompressionRatio()",
+    "CostOfPass(threshold, score_field)",
+    "Latency()",
+    "PerDatasetBreakdown(score_field)",
+    "ParetoRank",
+    "context-bench --proxy URL --dataset NAME [options]",
+    "context-bench memory --system NAME --relay URL [options]",
+    "context-bench dspy --optimizer NAME --dataset NAME [options]"
+  ]
+}
