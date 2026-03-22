@@ -1,0 +1,56 @@
+---
+title: "PerQATypeMetric"
+description: "Mean score broken down by QA type from row metadata. Used for memory system evaluations."
+---
+
+`PerQATypeMetric` slices scores by the `qa_type` key in each `EvalRow`'s metadata and computes the mean score per type. It is designed for memory system evaluations where examples have QA types such as `single_hop`, `multi_hop`, `temporal`, `open_domain`, and `adversarial`.
+
+```python
+from context_bench.metrics import PerQATypeMetric
+```
+
+## Constructor parameters
+
+<ParamField path="score_field" type="string" default="f1">
+  Name of the score key to aggregate per QA type. Must match a key emitted by an evaluator.
+</ParamField>
+
+## Return value
+
+`compute()` returns a `dict[str, float]` with:
+
+<ResponseField name="{score_field}_{qa_type}" type="float">
+  Mean score for each QA type present in the rows. For example, with `score_field="f1"` and QA types `temporal` and `multi_hop`, the returned dict contains `f1_temporal` and `f1_multi_hop`.
+</ResponseField>
+
+<ResponseField name="{score_field}_mean" type="float">
+  Overall mean score across all QA types.
+</ResponseField>
+
+## Usage
+
+```python
+from context_bench import evaluate_memory
+from context_bench.evaluators import AnswerQuality, MemoryJudge
+from context_bench.metrics import PerQATypeMetric
+
+result = evaluate_memory(
+    systems=[my_memory_system],
+    dataset=locomo_data,
+    evaluators=[AnswerQuality(), MemoryJudge(base_url="http://localhost:8080")],
+    metrics=[PerQATypeMetric(score_field="f1")],
+)
+
+summary = result.summary["my-memory-system"]
+print(summary["f1_temporal"])    # mean F1 on temporal questions
+print(summary["f1_multi_hop"])   # mean F1 on multi-hop questions
+print(summary["f1_mean"])        # overall mean F1
+```
+
+## When it is enabled
+
+`PerQATypeMetric` is automatically used by the `context-bench memory` CLI subcommand. It reads `row.metadata["qa_type"]` which is populated by `evaluate_memory()` from the dataset's QA pair type field.
+
+<Note>
+  Rows where `qa_type` is absent in metadata are grouped under the key `"unknown"`.
+</Note>

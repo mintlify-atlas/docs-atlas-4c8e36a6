@@ -1,0 +1,78 @@
+---
+title: "TokenEfficiencyMetric"
+description: "Score per 1K input tokens. The primary optimization target for the autoresearch loop."
+---
+
+`TokenEfficiencyMetric` computes accuracy per token as a primary optimization target for the autoresearch loop. It produces a single number to maximize when trading off quality versus cost.
+
+```python
+from context_bench.metrics import TokenEfficiencyMetric
+```
+
+## Constructor parameters
+
+<ParamField path="score_field" type="string" default="f1">
+  Name of the score key to use as quality. Must match a key emitted by an evaluator.
+</ParamField>
+
+## Formula
+
+```
+token_efficiency = mean(scores[score_field]) * (100 / mean(input_tokens))^0.1
+```
+
+The score is F1-dominant: it softly penalizes token bloat without allowing the metric to be gamed by driving tokens to near-zero. A raw ratio (`mean_score / (mean_input_tokens / 1000)`) is also returned as `token_efficiency_raw`.
+
+## Return value
+
+<ResponseField name="token_efficiency" type="float">
+  Adjusted score per token (F1-dominant). The primary optimization target — higher is better. Maximize this when tuning a retrieval pipeline.
+</ResponseField>
+
+<ResponseField name="token_efficiency_raw" type="float">
+  Raw `mean_score / (mean_input_tokens / 1000)`. Kept for analysis; use `token_efficiency` for optimization.
+</ResponseField>
+
+<ResponseField name="mean_score" type="float">
+  Mean value of `score_field` across all rows.
+</ResponseField>
+
+<ResponseField name="mean_input_tokens" type="float">
+  Mean input token count per row.
+</ResponseField>
+
+<ResponseField name="mean_ingest_latency" type="float">
+  Mean ingest latency in seconds (from `row.metadata["ingest_latency"]`). Relevant for memory system evaluations.
+</ResponseField>
+
+<ResponseField name="mean_query_latency" type="float">
+  Mean query latency in seconds (from `row.metadata["query_latency"]`). Relevant for memory system evaluations.
+</ResponseField>
+
+## Usage
+
+```python
+from context_bench import evaluate_memory
+from context_bench.evaluators import AnswerQuality, MemoryJudge
+from context_bench.metrics import TokenEfficiencyMetric
+
+result = evaluate_memory(
+    systems=[my_memory_system],
+    dataset=locomo_data,
+    evaluators=[AnswerQuality(), MemoryJudge(base_url="http://localhost:8080")],
+    metrics=[TokenEfficiencyMetric(score_field="f1")],
+)
+
+summary = result.summary["my-memory-system"]
+print(summary["token_efficiency"])     # e.g. 0.043  (higher = better)
+print(summary["mean_score"])           # e.g. 0.61
+print(summary["mean_input_tokens"])    # e.g. 1420.0
+```
+
+## When it is enabled
+
+`TokenEfficiencyMetric` is automatically used by the `context-bench memory` CLI subcommand. It is also used as the optimization target in the [autoresearch loop](/guides/autoresearch-loop).
+
+<Tip>
+  Maximize `token_efficiency` when running the autoresearch loop to find pipelines that achieve high quality without spending excessive tokens on context retrieval.
+</Tip>

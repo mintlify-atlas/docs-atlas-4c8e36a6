@@ -1,0 +1,123 @@
+---
+title: "MemoryJudge"
+description: "LLM-as-judge evaluator for memory QA tasks. Scores whether a system answer correctly responds to a question given the known gold answer."
+---
+
+`MemoryJudge` uses an external LLM to judge whether a memory system's answer correctly addresses a question, given the ground-truth answer. It returns a binary score and is designed for short-answer memory QA tasks where token-overlap metrics like F1 can be unreliable.
+
+```python
+from context_bench.evaluators import MemoryJudge
+```
+
+## Constructor
+
+```python
+MemoryJudge(
+    base_url: str,
+    model: str = "claude-haiku-4-5-20251001",
+    api_key: str | None = None,
+    timeout: float = 60.0,
+    max_retries: int = 3,
+    retry_base_delay: float = 1.0,
+)
+```
+
+## Parameters
+
+<ParamField path="base_url" type="str" required>
+  Root URL of the relay/proxy, e.g. `"http://localhost:8080"`. All requests are routed through this endpoint.
+</ParamField>
+
+<ParamField path="model" type="str" default="claude-haiku-4-5-20251001">
+  Model name sent to the relay.
+</ParamField>
+
+<ParamField path="api_key" type="str | None" default="None">
+  Bearer token. Falls back to the `OPENAI_API_KEY` environment variable when `None`.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="60.0">
+  HTTP request timeout in seconds per attempt.
+</ParamField>
+
+<ParamField path="max_retries" type="int" default="3">
+  Retries on transient failures (HTTP 429/5xx, connection errors).
+</ParamField>
+
+<ParamField path="retry_base_delay" type="float" default="1.0">
+  Base delay in seconds for exponential backoff between retries.
+</ParamField>
+
+## score()
+
+```python
+def score(self, original: dict, processed: dict) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Uses `"question"` and `"answer"` (ground truth).
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system. Uses `"response"` (the system's answer).
+</ParamField>
+
+### Return values
+
+<ResponseField name="memory_judge" type="float">
+  Binary score: `1.0` if the judge considers the answer correct, `0.0` otherwise. On judge failure, returns `0.0` rather than propagating the exception.
+</ResponseField>
+
+<ResponseField name="memory_judge_raw" type="float">
+  Currently identical to `memory_judge`. Reserved for future partial-credit scoring.
+</ResponseField>
+
+<Note>
+  When the gold answer is empty (no ground truth available), `MemoryJudge` returns `0.5` for both fields as a neutral score — neither inflating nor deflating the system's mean.
+</Note>
+
+## How it works
+
+`MemoryJudge` prompts the LLM with the question, the gold answer, and the system's answer. The judge is instructed to return YES if the system answer conveys the same essential information as the gold answer (minor wording differences and extra context are acceptable), and NO otherwise.
+
+## Usage
+
+```python
+from context_bench.evaluators import MemoryJudge
+
+judge = MemoryJudge(base_url="http://localhost:8080", model="claude-haiku-4-5-20251001")
+
+judge.score(
+    {"question": "Where did Alice grow up?", "answer": "Paris"},
+    {"response": "Alice grew up in Paris, France."},
+)
+# {"memory_judge": 1.0, "memory_judge_raw": 1.0}
+
+judge.score(
+    {"question": "Where did Alice grow up?", "answer": "Paris"},
+    {"response": "Alice grew up in London."},
+)
+# {"memory_judge": 0.0, "memory_judge_raw": 0.0}
+```
+
+## When it is used
+
+`MemoryJudge` is automatically used by the `context-bench memory` CLI subcommand alongside `AnswerQuality`. Use it via the Python API for full control:
+
+```python
+from context_bench import evaluate_memory
+from context_bench.evaluators import AnswerQuality, MemoryJudge
+
+result = evaluate_memory(
+    systems=[my_memory_system],
+    dataset=locomo_data,
+    evaluators=[
+        AnswerQuality(),
+        MemoryJudge(base_url="http://localhost:8080"),
+    ],
+)
+
+# Access judge scores
+for row in result.rows:
+    print(row.scores["memory_judge"], row.scores["f1"])
+```

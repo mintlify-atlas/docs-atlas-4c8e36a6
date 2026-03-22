@@ -87,7 +87,9 @@
               "api/evaluators/math-equivalence",
               "api/evaluators/nli-label-match",
               "api/evaluators/ifeval-checker",
-              "api/evaluators/llm-judge"
+              "api/evaluators/llm-judge",
+              "api/evaluators/memory-judge",
+              "api/evaluators/false-memory-rate"
             ]
           },
           {
@@ -99,7 +101,9 @@
               "api/metrics/cost-of-pass",
               "api/metrics/latency",
               "api/metrics/per-dataset-breakdown",
-              "api/metrics/pareto-rank"
+              "api/metrics/pareto-rank",
+              "api/metrics/per-qa-type",
+              "api/metrics/token-efficiency"
             ]
           },
           {

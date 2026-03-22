@@ -114,13 +114,12 @@ def load_my_dataset(n: int | None = None) -> list[dict]:
 registry.register("dataset", "my_dataset", load_my_dataset)
 ```
 
-After registration, `my_dataset` can be referenced anywhere a built-in name is
-accepted:
+After registration, load it programmatically using the registry helpers:
 
 ```python
-from context_bench.__main__ import _load_dataset
+from context_bench.registry import load_dataset
 
-examples = _load_dataset("my_dataset", max_examples=50)
+examples = load_dataset("my_dataset", n=50)
 ```
 
 <Tip>

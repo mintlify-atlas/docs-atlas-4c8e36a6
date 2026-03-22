@@ -81,7 +81,11 @@ Measures how much the system reduces token count: `1 - (output_tokens / input_to
 from context_bench.metrics import CompressionRatio
 
 CompressionRatio()
-# Returns: {"compression_ratio": 0.42}
+# Returns: {
+#   "compression_ratio": 0.42,
+#   "mean_input_tokens": 3200.0,
+#   "mean_output_tokens": 1856.0,
+# }
 ```
 
 Token counting uses tiktoken (`cl100k_base`) by default. Swap the tokenizer via `context_bench.utils.tokens`.
@@ -90,7 +94,7 @@ Token counting uses tiktoken (`cl100k_base`) by default. Swap the tokenizer via 
 
 ### CostOfPass
 
-Tokens spent per successful completion — the input tokens consumed for every example that passes the threshold. Lower is better. Based on the methodology from [arXiv:2504.13359](https://arxiv.org/abs/2504.13359).
+Output tokens spent per successful completion: `total_output_tokens / num_passing_examples`. Lower is better. Based on the methodology from [arXiv:2504.13359](https://arxiv.org/abs/2504.13359).
 
 ```python
 from context_bench.metrics import CostOfPass
@@ -132,27 +136,33 @@ from context_bench.metrics import PerDatasetBreakdown
 
 PerDatasetBreakdown(score_field="f1")
 # Returns: {
-#   "hotpotqa_mean": 0.71,
-#   "gsm8k_mean": 0.88,
+#   "dataset:hotpotqa": 0.71,
+#   "dataset:gsm8k": 0.88,
 # }
 ```
 
-Each `EvalRow` carries a `dataset` field set from `example["dataset"]`. Rows without a dataset tag are grouped together.
+Each `EvalRow` carries a `dataset` field set from `example["dataset"]`. Rows without a dataset tag appear under `"dataset:unknown"`.
 
 ---
 
 ### ParetoRank
 
-Ranks systems on the quality-vs-cost Pareto frontier. Automatically enabled for multi-system runs.
+Ranks systems on the quality-vs-cost Pareto frontier. Automatically enabled for multi-system CLI runs.
 
 ```python
-from context_bench.metrics import ParetoRank
+from context_bench.metrics.token_stats import ParetoRank
 
-ParetoRank(score_field="f1")
-# Returns: {"pareto_rank": 1.0}  # 1 = Pareto-dominant
+# Per-system compute() returns a placeholder 0.0.
+# Use rank_systems() for the actual ranking after evaluate():
+ranks = ParetoRank.rank_systems(
+    result.summary,
+    quality_field="mean_score",
+    cost_field="cost_of_pass",
+)
+# {'kompact': 1, 'baseline': 2}
 ```
 
-A system is Pareto-dominant if no other system beats it on both quality and token cost simultaneously.
+A system is Pareto-dominant (rank 1) if no other system beats it on both quality and token cost simultaneously. The constructor accepts `quality_field` (default `"score"`) and `cost_field` (default `"cost_of_pass"`).
 
 ## Using metrics
 

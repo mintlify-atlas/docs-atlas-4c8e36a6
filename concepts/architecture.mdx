@@ -139,8 +139,8 @@ registry.register("dataset", "my-data", my_loader_fn)
 # Or use the convenience wrapper
 register_dataset("my-data", my_loader_fn)
 
-# Load by name
-dataset = load_dataset("my-data", split="validation")
+# Load by name (kwargs are forwarded to the loader function)
+dataset = load_dataset("my-data", n=100)
 
 # List available names
 registry.list("dataset")

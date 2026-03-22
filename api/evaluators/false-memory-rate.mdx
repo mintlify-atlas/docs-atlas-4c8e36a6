@@ -1,0 +1,124 @@
+---
+title: "FalseMemoryRate"
+description: "LLM-based hallucination detector for memory QA systems. Flags answers containing fabricated facts."
+---
+
+`FalseMemoryRate` uses an LLM judge to detect whether a memory system's answer contains hallucinated facts — specific claims (dates, names, numbers, events) that could not have been derived from the conversation history.
+
+```python
+from context_bench.evaluators import FalseMemoryRate
+```
+
+## Constructor
+
+```python
+FalseMemoryRate(
+    base_url: str,
+    model: str = "claude-haiku-4-5-20251001",
+    api_key: str | None = None,
+    timeout: float = 60.0,
+    max_retries: int = 3,
+    retry_base_delay: float = 1.0,
+)
+```
+
+## Parameters
+
+<ParamField path="base_url" type="str" required>
+  Root URL of the relay/proxy, e.g. `"http://localhost:8080"`. All requests are routed through this endpoint.
+</ParamField>
+
+<ParamField path="model" type="str" default="claude-haiku-4-5-20251001">
+  Model name sent to the relay.
+</ParamField>
+
+<ParamField path="api_key" type="str | None" default="None">
+  Bearer token. Falls back to the `OPENAI_API_KEY` environment variable when `None`.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="60.0">
+  HTTP request timeout in seconds per attempt.
+</ParamField>
+
+<ParamField path="max_retries" type="int" default="3">
+  Retries on transient failures (HTTP 429/5xx, connection errors).
+</ParamField>
+
+<ParamField path="retry_base_delay" type="float" default="1.0">
+  Base delay in seconds for exponential backoff between retries.
+</ParamField>
+
+## score()
+
+```python
+def score(self, original: dict, processed: dict) -> dict[str, float]
+```
+
+<ParamField path="original" type="dict" required>
+  The unmodified example dict. Uses `"context"` (conversation history) and `"question"`.
+</ParamField>
+
+<ParamField path="processed" type="dict" required>
+  The output dict returned by the system. Uses `"response"` (the system's answer).
+</ParamField>
+
+### Return values
+
+<ResponseField name="false_memory" type="float">
+  `1.0` if the judge detects hallucination (the answer contains specific facts absent from the conversation), `0.0` otherwise. On judge failure, returns `0.0` (conservative) rather than propagating the exception.
+</ResponseField>
+
+## How it works
+
+`FalseMemoryRate` prompts the LLM judge with the conversation context, the question, and the system's answer. The judge is instructed to detect whether the answer contains **specific claims** (dates, names, numbers, places, events) that are **absent from the conversation** and therefore potentially fabricated.
+
+Facts that appear in the conversation are not flagged as hallucinations — the memory system is expected to recall them.
+
+## Usage
+
+```python
+from context_bench.evaluators import FalseMemoryRate
+
+fmr = FalseMemoryRate(base_url="http://localhost:8080")
+
+fmr.score(
+    {
+        "context": "USER: I visited Tokyo in March 2022.\nASSISTANT: That's great!",
+        "question": "When did the user visit Tokyo?",
+    },
+    {"response": "The user visited Tokyo in March 2022."},
+)
+# {"false_memory": 0.0}  — answer is grounded in the conversation
+
+fmr.score(
+    {
+        "context": "USER: I visited Tokyo last spring.\nASSISTANT: That's great!",
+        "question": "When did the user visit Tokyo?",
+    },
+    {"response": "The user visited Tokyo in March 2022."},
+)
+# {"false_memory": 1.0}  — specific date not in conversation
+```
+
+<Note>
+  `FalseMemoryRate` requires a live relay endpoint. It is used automatically by the `context-bench memory` CLI subcommand alongside `AnswerQuality` and `MemoryJudge`.
+</Note>
+
+## When it is used
+
+`FalseMemoryRate` is designed for memory system evaluations (`evaluate_memory()`). The `context-bench memory` subcommand uses `AnswerQuality` and `MemoryJudge` by default; add `FalseMemoryRate` via the Python API for hallucination tracking:
+
+```python
+from context_bench import evaluate_memory
+from context_bench.evaluators import AnswerQuality, FalseMemoryRate, MemoryJudge
+
+result = evaluate_memory(
+    systems=[my_memory_system],
+    dataset=locomo_data,
+    evaluators=[
+        AnswerQuality(),
+        MemoryJudge(base_url="http://localhost:8080"),
+        FalseMemoryRate(base_url="http://localhost:8080"),
+    ],
+)
+```
